@@ -1,0 +1,11 @@
+# Generated files and directories
+photos/*
+videos/*
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+
+# Keep the directories but ignore contents
+!photos/.gitkeep
+!videos/.gitkeep
