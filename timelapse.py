@@ -118,6 +118,7 @@ class TimelapseCamera:
 
             start_time = s['sunrise'] - timedelta(hours=self.config['hours_before_sunrise'])
             end_time = s['sunset'] + timedelta(hours=self.config['hours_after_sunset'])
+            logger.info(f"Today's recording from {start_time.strftime('%Y-%m-%d %H:%M:%S')} to {end_time.strftime('%Y-%m-%d %H:%M:%S')} ")
 
             return start_time, end_time
         except Exception as e:
@@ -184,7 +185,7 @@ class TimelapseCamera:
         while True:
             try:
                 start_time, end_time = self.get_sun_times()
-                current_time = datetime.now()
+                current_time = datetime.now(start_time.tzinfo)  # Make current_time timezone-aware
 
                 if start_time <= current_time <= end_time:
                     self.take_photo()
@@ -192,14 +193,14 @@ class TimelapseCamera:
                 elif current_time > end_time:
                     self.create_video()
                     # Wait until next day
-                    tomorrow = datetime.now() + timedelta(days=1)
+                    tomorrow = current_time + timedelta(days=1)
                     tomorrow_start = tomorrow.replace(
                         hour=start_time.hour,
                         minute=start_time.minute,
                         second=0,
                         microsecond=0
                     )
-                    sleep_seconds = (tomorrow_start - datetime.now()).total_seconds()
+                    sleep_seconds = (tomorrow_start - current_time).total_seconds()
                     logger.info(f"Waiting {sleep_seconds/3600:.1f} hours until next day")
                     time.sleep(sleep_seconds)
                 else:
