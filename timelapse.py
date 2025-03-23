@@ -140,16 +140,20 @@ class TimelapseCamera:
     def create_video(self):
         """Create video from photos taken today"""
         try:
-            today = datetime.now().strftime('%Y%m%d')
-            output_file = self.videos_dir / f"timelapse_{today}.mp4"
+            # Video creation temporarily disabled for stability testing
+            logger.info("Video creation temporarily disabled for stability testing")
+            return
 
-            # Use ffmpeg to create video from photos
-            # -y: Override output file if it exists
-            # -b:v 8M: Set video bitrate to 8 Mbps
-            os.system(f"ffmpeg -y -framerate 30 -pattern_type glob -i '{self.photos_dir}/photo_{today}_*.jpg' "
-                     f"-c:v libx264 -pix_fmt yuv420p -b:v 8M {output_file}")
-
-            logger.info(f"Video created: {output_file}")
+            # today = datetime.now().strftime('%Y%m%d')
+            # output_file = self.videos_dir / f"timelapse_{today}.mp4"
+            #
+            # # Use ffmpeg to create video from photos
+            # # -y: Override output file if it exists
+            # # -b:v 8M: Set video bitrate to 8 Mbps
+            # os.system(f"ffmpeg -y -framerate 30 -pattern_type glob -i '{self.photos_dir}/photo_{today}_*.jpg' "
+            #          f"-c:v libx264 -pix_fmt yuv420p -b:v 8M {output_file}")
+            #
+            # logger.info(f"Video created: {output_file}")
         except Exception as e:
             logger.error(f"Failed to create video: {e}")
 
@@ -169,11 +173,13 @@ class TimelapseCamera:
                 self.take_photo()
                 time.sleep(self.config['test_interval_seconds'])
 
-            if not self.skip_video:
-                logger.info("Creating test video")
-                self.create_video()
-            else:
-                logger.info("Skipping video creation (--no-video flag set)")
+            # Video creation temporarily disabled for stability testing
+            logger.info("Video creation temporarily disabled for stability testing")
+            # if not self.skip_video:
+            #     logger.info("Creating test video")
+            #     self.create_video()
+            # else:
+            #     logger.info("Skipping video creation (--no-video flag set)")
 
             logger.info("Test completed")
 
@@ -191,7 +197,9 @@ class TimelapseCamera:
                     self.take_photo()
                     time.sleep(self.config['interval_minutes'] * 60)
                 elif current_time > end_time:
-                    self.create_video()
+                    # Video creation temporarily disabled for stability testing
+                    logger.info("Video creation temporarily disabled for stability testing")
+                    # self.create_video()
                     # Wait until next day
                     tomorrow = current_time + timedelta(days=1)
                     tomorrow_start = tomorrow.replace(
