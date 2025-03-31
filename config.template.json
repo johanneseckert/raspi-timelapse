@@ -1,0 +1,32 @@
+{
+	"location": {
+		"latitude": 48.4639,
+		"longitude": 9.2075,
+		"timezone": "Europe/Berlin"
+	},
+	"camera": {
+		"hours_before_sunrise": 1,
+		"hours_after_sunset": 1,
+		"interval_minutes": 1,
+		"resolution": {
+			"width": 1920,
+			"height": 1080
+		}
+	},
+	"mqtt": {
+		"host": "localhost",
+		"port": 1883,
+		"username": null,
+		"password": null
+	},
+	"test_mode": {
+		"capture_count": 10,
+		"interval_seconds": 2
+	},
+	"paths": {
+		"base_dir": "/opt/timelapse",
+		"photos_dir": "photos",
+		"videos_dir": "videos",
+		"log_file": "timelapse.log"
+	}
+}

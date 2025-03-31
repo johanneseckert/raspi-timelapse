@@ -41,11 +41,48 @@ sudo systemctl start timelapse
 
 ## Configuration
 
-Edit the `config` dictionary in the script to adjust:
-- Latitude/Longitude
-- Hours before sunrise/after sunset
-- Capture interval
-- Resolution
+1. Copy the template configuration file:
+```bash
+cp config.template.json config.json
+```
+
+2. Edit `config.json` to match your setup:
+```json
+{
+	"location": {
+		"latitude": 48.4639,      // Your latitude
+		"longitude": 9.2075,      // Your longitude
+		"timezone": "Europe/Berlin"  // Your timezone
+	},
+	"camera": {
+		"hours_before_sunrise": 1,  // Start capturing this many hours before sunrise
+		"hours_after_sunset": 1,    // Continue capturing this many hours after sunset
+		"interval_minutes": 1,      // Minutes between photos
+		"resolution": {
+			"width": 1920,         // Photo width
+			"height": 1080         // Photo height
+		}
+	},
+	"mqtt": {
+		"host": "localhost",      // MQTT broker host (for Home Assistant)
+		"port": 1883,            // MQTT broker port
+		"username": null,        // MQTT username if required
+		"password": null         // MQTT password if required
+	},
+	"test_mode": {
+		"capture_count": 10,     // Number of photos in test mode
+		"interval_seconds": 2     // Seconds between photos in test mode
+	},
+	"paths": {
+		"base_dir": "/opt/timelapse",  // Base directory for all files
+		"photos_dir": "photos",        // Photo directory (relative to base_dir)
+		"videos_dir": "videos",        // Video directory (relative to base_dir)
+		"log_file": "timelapse.log"    // Log file (relative to base_dir)
+	}
+}
+```
+
+The `config.json` file is ignored by git to keep your settings private. The template file (`config.template.json`) contains default values and is version controlled.
 
 ## Monitoring
 

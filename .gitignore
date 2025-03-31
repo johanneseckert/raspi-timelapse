@@ -9,3 +9,18 @@ __pycache__/
 # Keep the directories but ignore contents
 !photos/.gitkeep
 !videos/.gitkeep
+
+# Ignore actual config file
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Media files
+*.jpg
+*.mp4
