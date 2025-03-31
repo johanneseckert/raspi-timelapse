@@ -92,13 +92,17 @@ logger = logging.getLogger(__name__)
 class HomeAssistantMQTT:
 	"""Handles MQTT communication with Home Assistant"""
 	def __init__(self, host="localhost", port=1883, username=None, password=None):
+		logger.info(f"Initializing MQTT connection to {host}:{port}")
 		self.client = mqtt.Client()
 		if username and password:
+			logger.info(f"Using MQTT authentication with username: {username}")
 			self.client.username_pw_set(username, password)
 
 		# Set up callbacks
 		self.client.on_connect = self.on_connect
 		self.client.on_message = self.on_message
+		self.client.on_publish = self.on_publish
+		self.client.on_disconnect = self.on_disconnect
 
 		# MQTT settings
 		self.host = host
@@ -117,23 +121,44 @@ class HomeAssistantMQTT:
 
 		# Connect to MQTT broker
 		try:
+			logger.info("Attempting to connect to MQTT broker...")
 			self.client.connect(host, port, 60)
 			self.client.loop_start()
-			logger.info(f"Connected to MQTT broker at {host}:{port}")
+			logger.info(f"MQTT loop started for {host}:{port}")
 		except Exception as e:
 			logger.error(f"Failed to connect to MQTT broker: {e}")
 			raise
 
 	def on_connect(self, client, userdata, flags, rc):
 		"""Callback when connected to MQTT broker"""
+		connection_responses = {
+			0: "Connected successfully",
+			1: "Incorrect protocol version",
+			2: "Invalid client identifier",
+			3: "Server unavailable",
+			4: "Bad username or password",
+			5: "Not authorized"
+		}
 		if rc == 0:
-			logger.info("Connected to MQTT broker")
+			logger.info(f"Connected to MQTT broker: {connection_responses.get(rc, 'Unknown response')}")
 			# Subscribe to command topics
-			self.client.subscribe(f"{self.device_name}/command/#")
+			topic = f"{self.device_name}/command/#"
+			logger.info(f"Subscribing to topic: {topic}")
+			self.client.subscribe(topic)
 			# Register entities with Home Assistant
+			logger.info("Registering entities with Home Assistant")
 			self.register_entities()
 		else:
-			logger.error(f"Failed to connect to MQTT broker with code {rc}")
+			logger.error(f"Failed to connect to MQTT broker: {connection_responses.get(rc, 'Unknown error')}")
+
+	def on_disconnect(self, client, userdata, rc):
+		"""Callback when disconnected from MQTT broker"""
+		if rc != 0:
+			logger.error(f"Unexpected MQTT disconnection (code {rc}). Will auto-reconnect.")
+
+	def on_publish(self, client, userdata, mid):
+		"""Callback when a message is published"""
+		logger.debug(f"Message {mid} published successfully")
 
 	def on_message(self, client, userdata, msg):
 		"""Handle incoming MQTT messages"""
@@ -157,6 +182,8 @@ class HomeAssistantMQTT:
 
 	def register_entities(self):
 		"""Register entities with Home Assistant via MQTT discovery"""
+		logger.info("Starting entity registration with Home Assistant")
+
 		# Switch for enabling/disabling capture
 		switch_config = {
 			"name": "Timelapse Capture",
@@ -165,11 +192,9 @@ class HomeAssistantMQTT:
 			"state_topic": f"{self.device_name}/state/capture",
 			"device": self.device_info
 		}
-		self.client.publish(
-			f"{self.base_topic}/switch/{self.device_name}/capture/config",
-			json.dumps(switch_config),
-			retain=True
-		)
+		topic = f"{self.base_topic}/switch/{self.device_name}/capture/config"
+		logger.info(f"Publishing switch configuration to {topic}")
+		self.client.publish(topic, json.dumps(switch_config), retain=True)
 
 		# Button for reboot
 		button_config = {
@@ -178,11 +203,9 @@ class HomeAssistantMQTT:
 			"command_topic": f"{self.device_name}/command/reboot",
 			"device": self.device_info
 		}
-		self.client.publish(
-			f"{self.base_topic}/button/{self.device_name}/reboot/config",
-			json.dumps(button_config),
-			retain=True
-		)
+		topic = f"{self.base_topic}/button/{self.device_name}/reboot/config"
+		logger.info(f"Publishing button configuration to {topic}")
+		self.client.publish(topic, json.dumps(button_config), retain=True)
 
 		# Sensor for uptime
 		sensor_config = {
@@ -192,11 +215,11 @@ class HomeAssistantMQTT:
 			"device": self.device_info,
 			"unit_of_measurement": "seconds"
 		}
-		self.client.publish(
-			f"{self.base_topic}/sensor/{self.device_name}/uptime/config",
-			json.dumps(sensor_config),
-			retain=True
-		)
+		topic = f"{self.base_topic}/sensor/{self.device_name}/uptime/config"
+		logger.info(f"Publishing sensor configuration to {topic}")
+		self.client.publish(topic, json.dumps(sensor_config), retain=True)
+
+		logger.info("Entity registration completed")
 
 	def publish_state(self, entity_type, state):
 		"""Publish state updates to Home Assistant"""
