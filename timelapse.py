@@ -224,13 +224,26 @@ class HomeAssistantMQTT:
 		camera_config = {
 			"name": "Timelapse Latest Photo",
 			"unique_id": f"{self.device_name}_latest_photo",
-			"topic": f"{self.device_name}/camera/image",  # Topic that will contain the base64 image
-			"encoding": "base64",  # Tell HA we're using base64 encoding
+			"topic": f"{self.device_name}/camera/image",
+			"encoding": "base64",
 			"device": self.device_info
 		}
 		topic = f"{self.base_topic}/camera/{self.device_name}/config"
 		logger.info(f"Publishing camera configuration to {topic}")
 		self.client.publish(topic, json.dumps(camera_config), retain=True)
+
+		# Last capture timestamp
+		timestamp_config = {
+			"name": "Last Photo Capture",
+			"unique_id": f"{self.device_name}_last_capture",
+			"state_topic": f"{self.device_name}/state/last_capture",
+			"device": self.device_info,
+			"device_class": "timestamp",  # This tells HA to format it as relative time
+			"entity_category": "diagnostic"
+		}
+		topic = f"{self.base_topic}/sensor/{self.device_name}/last_capture/config"
+		logger.info(f"Publishing timestamp sensor configuration to {topic}")
+		self.client.publish(topic, json.dumps(timestamp_config), retain=True)
 
 		# Switch for enabling/disabling capture
 		switch_config = {
@@ -397,6 +410,10 @@ class TimelapseCamera:
 						topic = f"{self.ha_mqtt.device_name}/camera/image"
 						logger.info(f"Publishing resized image ({len(img_base64)} bytes) to {topic}")
 						self.ha_mqtt.client.publish(topic, img_base64, retain=True)
+
+						# Publish timestamp in ISO format
+						now = datetime.now().isoformat()
+						self.ha_mqtt.publish_state("last_capture", now)
 
 						# Also publish the path for reference
 						self.ha_mqtt.publish_state("latest_photo", str(filepath))
