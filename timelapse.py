@@ -55,6 +55,7 @@ import argparse
 import paho.mqtt.client as mqtt
 from PIL import Image
 import io
+import base64
 
 def load_config():
 	"""Load configuration from JSON file"""
@@ -219,6 +220,18 @@ class HomeAssistantMQTT:
 		"""Register entities with Home Assistant via MQTT discovery"""
 		logger.info("Starting entity registration with Home Assistant")
 
+		# Camera image
+		camera_config = {
+			"name": "Timelapse Latest Photo",
+			"unique_id": f"{self.device_name}_latest_photo",
+			"topic": f"{self.device_name}/camera/image",  # Topic that will contain the base64 image
+			"encoding": "base64",  # Tell HA we're using base64 encoding
+			"device": self.device_info
+		}
+		topic = f"{self.base_topic}/camera/{self.device_name}/config"
+		logger.info(f"Publishing camera configuration to {topic}")
+		self.client.publish(topic, json.dumps(camera_config), retain=True)
+
 		# Switch for enabling/disabling capture
 		switch_config = {
 			"name": "Timelapse Capture",
@@ -230,17 +243,6 @@ class HomeAssistantMQTT:
 		topic = f"{self.base_topic}/switch/{self.device_name}/capture/config"
 		logger.info(f"Publishing switch configuration to {topic}")
 		self.client.publish(topic, json.dumps(switch_config), retain=True)
-
-		# Camera image
-		camera_config = {
-			"name": "Timelapse Latest Photo",
-			"unique_id": f"{self.device_name}_latest_photo",
-			"image_topic": f"{self.device_name}/camera/image",
-			"device": self.device_info
-		}
-		topic = f"{self.base_topic}/camera/{self.device_name}/config"
-		logger.info(f"Publishing camera configuration to {topic}")
-		self.client.publish(topic, json.dumps(camera_config), retain=True)
 
 		# Button for reboot
 		button_config = {
@@ -388,10 +390,13 @@ class TimelapseCamera:
 						resized_img.save(img_byte_arr, format='JPEG', quality=70)
 						img_byte_arr = img_byte_arr.getvalue()
 
+						# Convert to base64
+						img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
+
 						# Publish to MQTT
-						topic = f"timelapse_camera/camera/image"
-						logger.info(f"Publishing resized image ({len(img_byte_arr)} bytes) to {topic}")
-						self.ha_mqtt.client.publish(topic, img_byte_arr, retain=True)
+						topic = f"{self.ha_mqtt.device_name}/camera/image"
+						logger.info(f"Publishing resized image ({len(img_base64)} bytes) to {topic}")
+						self.ha_mqtt.client.publish(topic, img_base64, retain=True)
 
 						# Also publish the path for reference
 						self.ha_mqtt.publish_state("latest_photo", str(filepath))
