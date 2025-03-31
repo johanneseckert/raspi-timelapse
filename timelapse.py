@@ -127,8 +127,8 @@ class HomeAssistantMQTT:
 			self.device_info = {
 				"identifiers": [self.device_name],
 				"name": "Timelapse Camera",
-				"model": "Raspberry Pi Camera",
-				"manufacturer": "Custom",
+				"model": "Raspberry Pi Zero 2W with Pi Camera",
+				"manufacturer": "Johannes Eckert",
 				"sw_version": "1.0.0"
 			}
 
@@ -179,6 +179,9 @@ class HomeAssistantMQTT:
 			# Register entities with Home Assistant
 			logger.info("Registering entities with Home Assistant")
 			self.register_entities()
+
+			# Set LWT (Last Will and Testament) for availability
+			self.client.will_set(f"{self.device_name}/status", "offline", retain=True)
 		else:
 			self.connected = False
 			logger.error(f"Failed to connect to MQTT broker: {connection_responses.get(rc, 'Unknown error')}")
@@ -226,11 +229,25 @@ class HomeAssistantMQTT:
 			"unique_id": f"{self.device_name}_latest_photo",
 			"topic": f"{self.device_name}/camera/image",
 			"encoding": "base64",
-			"device": self.device_info
+			"device": self.device_info,
+			"availability_topic": f"{self.device_name}/status"
 		}
 		topic = f"{self.base_topic}/camera/{self.device_name}/config"
 		logger.info(f"Publishing camera configuration to {topic}")
 		self.client.publish(topic, json.dumps(camera_config), retain=True)
+
+		# Uptime sensor
+		uptime_config = {
+			"name": "Timelapse Uptime",
+			"unique_id": f"{self.device_name}_uptime",
+			"state_topic": f"{self.device_name}/state/uptime",
+			"device": self.device_info,
+			"unit_of_measurement": "seconds",
+			"availability_topic": f"{self.device_name}/status"
+		}
+		topic = f"{self.base_topic}/sensor/{self.device_name}/uptime/config"
+		logger.info(f"Publishing uptime sensor configuration to {topic}")
+		self.client.publish(topic, json.dumps(uptime_config), retain=True)
 
 		# Last capture timestamp
 		timestamp_config = {
@@ -238,49 +255,16 @@ class HomeAssistantMQTT:
 			"unique_id": f"{self.device_name}_last_capture",
 			"state_topic": f"{self.device_name}/state/last_capture",
 			"device": self.device_info,
-			"device_class": "timestamp",  # This tells HA to format it as relative time
-			"entity_category": "diagnostic"
+			"device_class": "timestamp",
+			"entity_category": "diagnostic",
+			"availability_topic": f"{self.device_name}/status"
 		}
 		topic = f"{self.base_topic}/sensor/{self.device_name}/last_capture/config"
 		logger.info(f"Publishing timestamp sensor configuration to {topic}")
 		self.client.publish(topic, json.dumps(timestamp_config), retain=True)
 
-		# Switch for enabling/disabling capture
-		switch_config = {
-			"name": "Timelapse Capture",
-			"unique_id": f"{self.device_name}_capture",
-			"command_topic": f"{self.device_name}/command/capture",
-			"state_topic": f"{self.device_name}/state/capture",
-			"device": self.device_info
-		}
-		topic = f"{self.base_topic}/switch/{self.device_name}/capture/config"
-		logger.info(f"Publishing switch configuration to {topic}")
-		self.client.publish(topic, json.dumps(switch_config), retain=True)
-
-		# Button for reboot
-		button_config = {
-			"name": "Timelapse Camera Reboot",
-			"unique_id": f"{self.device_name}_reboot",
-			"command_topic": f"{self.device_name}/command/reboot",
-			"device": self.device_info
-		}
-		topic = f"{self.base_topic}/button/{self.device_name}/reboot/config"
-		logger.info(f"Publishing button configuration to {topic}")
-		self.client.publish(topic, json.dumps(button_config), retain=True)
-
-		# Sensor for uptime
-		sensor_config = {
-			"name": "Timelapse Uptime",
-			"unique_id": f"{self.device_name}_uptime",
-			"state_topic": f"{self.device_name}/state/uptime",
-			"device": self.device_info,
-			"unit_of_measurement": "seconds"
-		}
-		topic = f"{self.base_topic}/sensor/{self.device_name}/uptime/config"
-		logger.info(f"Publishing sensor configuration to {topic}")
-		self.client.publish(topic, json.dumps(sensor_config), retain=True)
-
-		logger.info("Entity registration completed")
+		# Publish initial online status
+		self.client.publish(f"{self.device_name}/status", "online", retain=True)
 
 	def publish_state(self, entity_type, state):
 		"""Publish state updates to Home Assistant"""
@@ -447,7 +431,7 @@ class TimelapseCamera:
 		if self.ha_mqtt:
 			# Update uptime
 			uptime = int(time.time() - self.start_time)
-			self.ha_mqtt.publish_state("uptime", uptime)
+			self.ha_mqtt.publish_state("uptime", str(uptime))
 
 			# Update capture state
 			self.ha_mqtt.publish_state("capture", "ON" if self.capturing_enabled else "OFF")
@@ -495,7 +479,7 @@ class TimelapseCamera:
 				self.update_ha_status()  # Update Home Assistant status
 
 				start_time, end_time = self.get_sun_times()
-				current_time = datetime.now(start_time.tzinfo)  # Make current_time timezone-aware
+				current_time = datetime.now(start_time.tzinfo)
 
 				if start_time <= current_time <= end_time and self.capturing_enabled:
 					self.take_photo()
@@ -503,26 +487,27 @@ class TimelapseCamera:
 				elif current_time > end_time:
 					# Video creation temporarily disabled for stability testing
 					logger.info("Video creation temporarily disabled for stability testing")
-					# self.create_video()
 					# Wait until next day
 					tomorrow = current_time + timedelta(days=1)
 					tomorrow_start = tomorrow.replace(
-							hour=start_time.hour,
-							minute=start_time.minute,
-							second=0,
-							microsecond=0
+						hour=start_time.hour,
+						minute=start_time.minute,
+						second=0,
+						microsecond=0
 					)
-					sleep_seconds = (tomorrow_start - current_time).total_seconds()
+					sleep_seconds = min((tomorrow_start - current_time).total_seconds(), 60)
 					logger.info(f"Waiting {sleep_seconds/3600:.1f} hours until next day")
 					time.sleep(sleep_seconds)
+					self.update_ha_status()  # Update status after long sleep
 				else:
 					# Wait until start time or until capturing is enabled
 					sleep_seconds = min(
-							(start_time - current_time).total_seconds(),
-							60  # Check status every minute
+						(start_time - current_time).total_seconds(),
+						60  # Check status every minute
 					)
 					logger.info(f"Waiting {sleep_seconds/3600:.1f} hours until start time")
 					time.sleep(sleep_seconds)
+					self.update_ha_status()  # Update status after sleep
 
 			except Exception as e:
 				logger.error(f"Error in main loop: {e}")
