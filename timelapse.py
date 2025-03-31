@@ -93,41 +93,64 @@ class HomeAssistantMQTT:
 	"""Handles MQTT communication with Home Assistant"""
 	def __init__(self, host="localhost", port=1883, username=None, password=None):
 		logger.info(f"Initializing MQTT connection to {host}:{port}")
-		self.client = mqtt.Client()
-		if username and password:
-			logger.info(f"Using MQTT authentication with username: {username}")
-			self.client.username_pw_set(username, password)
-
-		# Set up callbacks
-		self.client.on_connect = self.on_connect
-		self.client.on_message = self.on_message
-		self.client.on_publish = self.on_publish
-		self.client.on_disconnect = self.on_disconnect
-
-		# MQTT settings
-		self.host = host
-		self.port = port
-		self.base_topic = "homeassistant"
-		self.device_name = "timelapse_camera"
-
-		# Device info for Home Assistant
-		self.device_info = {
-			"identifiers": [self.device_name],
-			"name": "Timelapse Camera",
-			"model": "Raspberry Pi Camera",
-			"manufacturer": "Custom",
-			"sw_version": "1.0.0"
-		}
-
-		# Connect to MQTT broker
 		try:
-			logger.info("Attempting to connect to MQTT broker...")
+			# Enable MQTT internal logging
+			mqtt.Client.bad_connection_flag = False
+			mqtt_logger = logging.getLogger('mqtt')
+			mqtt_logger.setLevel(logging.DEBUG)
+
+			self.client = mqtt.Client()
+			self.client.enable_logger(mqtt_logger)
+
+			# Set up callbacks
+			self.client.on_connect = self.on_connect
+			self.client.on_message = self.on_message
+			self.client.on_publish = self.on_publish
+			self.client.on_disconnect = self.on_disconnect
+			self.client.on_log = self.on_log  # Add logging callback
+
+			if username and password:
+				logger.info(f"Configuring MQTT authentication with username: {username}")
+				self.client.username_pw_set(username, password)
+
+			# MQTT settings
+			self.host = host
+			self.port = port
+			self.base_topic = "homeassistant"
+			self.device_name = "timelapse_camera"
+			self.connected = False
+
+			# Device info for Home Assistant
+			self.device_info = {
+				"identifiers": [self.device_name],
+				"name": "Timelapse Camera",
+				"model": "Raspberry Pi Camera",
+				"manufacturer": "Custom",
+				"sw_version": "1.0.0"
+			}
+
+			# Connect to MQTT broker
+			logger.info(f"Attempting to connect to MQTT broker at {host}:{port}...")
 			self.client.connect(host, port, 60)
 			self.client.loop_start()
-			logger.info(f"MQTT loop started for {host}:{port}")
+			logger.info("MQTT network loop started")
+
 		except Exception as e:
-			logger.error(f"Failed to connect to MQTT broker: {e}")
+			logger.error(f"Failed to initialize MQTT: {str(e)}")
+			logger.error(f"Exception type: {type(e).__name__}")
+			logger.error(f"Stack trace:", exc_info=True)
 			raise
+
+	def on_log(self, client, userdata, level, buf):
+		"""Callback for MQTT internal logging"""
+		level_map = {
+			mqtt.MQTT_LOG_INFO: logging.INFO,
+			mqtt.MQTT_LOG_NOTICE: logging.INFO,
+			mqtt.MQTT_LOG_WARNING: logging.WARNING,
+			mqtt.MQTT_LOG_ERR: logging.ERROR,
+			mqtt.MQTT_LOG_DEBUG: logging.DEBUG
+		}
+		logger.log(level_map.get(level, logging.DEBUG), f"MQTT Internal: {buf}")
 
 	def on_connect(self, client, userdata, flags, rc):
 		"""Callback when connected to MQTT broker"""
@@ -140,21 +163,31 @@ class HomeAssistantMQTT:
 			5: "Not authorized"
 		}
 		if rc == 0:
+			self.connected = True
 			logger.info(f"Connected to MQTT broker: {connection_responses.get(rc, 'Unknown response')}")
+			logger.info(f"Connection flags: {flags}")
+
 			# Subscribe to command topics
 			topic = f"{self.device_name}/command/#"
 			logger.info(f"Subscribing to topic: {topic}")
-			self.client.subscribe(topic)
+			result, mid = self.client.subscribe(topic)
+			logger.info(f"Subscription result: {result} (0=success) with message ID: {mid}")
+
 			# Register entities with Home Assistant
 			logger.info("Registering entities with Home Assistant")
 			self.register_entities()
 		else:
+			self.connected = False
 			logger.error(f"Failed to connect to MQTT broker: {connection_responses.get(rc, 'Unknown error')}")
+			logger.error(f"Connection flags: {flags}")
 
 	def on_disconnect(self, client, userdata, rc):
 		"""Callback when disconnected from MQTT broker"""
+		self.connected = False
 		if rc != 0:
 			logger.error(f"Unexpected MQTT disconnection (code {rc}). Will auto-reconnect.")
+		else:
+			logger.info("Disconnected from MQTT broker")
 
 	def on_publish(self, client, userdata, mid):
 		"""Callback when a message is published"""
@@ -223,11 +256,15 @@ class HomeAssistantMQTT:
 
 	def publish_state(self, entity_type, state):
 		"""Publish state updates to Home Assistant"""
-		self.client.publish(
-			f"{self.device_name}/state/{entity_type}",
-			json.dumps({"state": state}),
-			retain=True
-		)
+		if not self.connected:
+			logger.warning(f"Cannot publish state - MQTT not connected")
+			return
+
+		topic = f"{self.device_name}/state/{entity_type}"
+		payload = json.dumps({"state": state})
+		logger.info(f"Publishing to {topic}: {payload}")
+		result, mid = self.client.publish(topic, payload, retain=True)
+		logger.info(f"Publish result: {result} (0=success) with message ID: {mid}")
 
 	def disconnect(self):
 		"""Disconnect from MQTT broker"""
@@ -237,6 +274,10 @@ class HomeAssistantMQTT:
 class TimelapseCamera:
 	def __init__(self, test_mode=False, skip_video=False):
 		self.config = load_config()
+		logger.info("Loaded configuration:")
+		logger.info(f"MQTT Settings - Host: {self.config['mqtt']['host']}, Port: {self.config['mqtt']['port']}")
+		logger.info(f"MQTT Auth - Username: {'configured' if self.config['mqtt']['username'] else 'not configured'}")
+
 		self.camera = Picamera2()
 		self.setup_camera()
 		self.base_dir = Path(self.config['paths']['base_dir'])
@@ -250,14 +291,17 @@ class TimelapseCamera:
 
 		# Initialize MQTT connection
 		try:
+			logger.info("Attempting to initialize MQTT handler...")
 			self.ha_mqtt = HomeAssistantMQTT(
 				host=self.config['mqtt']['host'],
 				port=self.config['mqtt']['port'],
 				username=self.config['mqtt']['username'],
 				password=self.config['mqtt']['password']
 			)
+			logger.info("MQTT handler initialized successfully")
 		except Exception as e:
-			logger.error(f"Failed to initialize MQTT: {e}")
+			logger.error(f"Failed to initialize MQTT handler: {str(e)}")
+			logger.error("MQTT will be disabled")
 			self.ha_mqtt = None
 
 	def setup_camera(self):
