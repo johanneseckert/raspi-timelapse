@@ -53,6 +53,8 @@ from astral import LocationInfo # type: ignore
 from astral.sun import sun # type: ignore
 import argparse
 import paho.mqtt.client as mqtt
+from PIL import Image
+import io
 
 def load_config():
 	"""Load configuration from JSON file"""
@@ -229,6 +231,17 @@ class HomeAssistantMQTT:
 		logger.info(f"Publishing switch configuration to {topic}")
 		self.client.publish(topic, json.dumps(switch_config), retain=True)
 
+		# Camera image
+		camera_config = {
+			"name": "Timelapse Latest Photo",
+			"unique_id": f"{self.device_name}_latest_photo",
+			"image_topic": f"{self.device_name}/camera/image",
+			"device": self.device_info
+		}
+		topic = f"{self.base_topic}/camera/{self.device_name}/config"
+		logger.info(f"Publishing camera configuration to {topic}")
+		self.client.publish(topic, json.dumps(camera_config), retain=True)
+
 		# Button for reboot
 		button_config = {
 			"name": "Timelapse Camera Reboot",
@@ -361,9 +374,29 @@ class TimelapseCamera:
 			self.camera.capture_file(str(filepath))
 			logger.info(f"Photo captured: {filename}")
 
-			# Publish latest photo info to Home Assistant
+			# Publish to Home Assistant
 			if self.ha_mqtt:
-				self.ha_mqtt.publish_state("latest_photo", str(filepath))
+				try:
+					# Open and resize image
+					with Image.open(filepath) as img:
+						# Calculate new size (1/4 of original)
+						new_size = (img.width // 4, img.height // 4)
+						resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+						# Convert to JPEG bytes
+						img_byte_arr = io.BytesIO()
+						resized_img.save(img_byte_arr, format='JPEG', quality=70)
+						img_byte_arr = img_byte_arr.getvalue()
+
+						# Publish to MQTT
+						topic = f"timelapse_camera/camera/image"
+						logger.info(f"Publishing resized image ({len(img_byte_arr)} bytes) to {topic}")
+						self.ha_mqtt.client.publish(topic, img_byte_arr, retain=True)
+
+						# Also publish the path for reference
+						self.ha_mqtt.publish_state("latest_photo", str(filepath))
+				except Exception as e:
+					logger.error(f"Failed to publish image: {e}")
 		except Exception as e:
 			logger.error(f"Failed to capture photo: {e}")
 

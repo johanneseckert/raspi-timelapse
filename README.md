@@ -15,9 +15,12 @@ This is a Python-based timelapse camera system for Raspberry Pi that automatical
 
 1. Install dependencies:
 ```bash
-# Update system and install required packages
+# System packages
 sudo apt-get update
-sudo apt-get install python3-pip python3-libcamera python3-picamera2 python3-astral ffmpeg
+sudo apt-get install -y python3-pip python3-libcamera python3-picamera2 python3-astral python3-paho-mqtt python3-pil ffmpeg
+
+# Or if you prefer using pip (not recommended on Debian/Raspberry Pi OS):
+# sudo pip3 install -r requirements.txt
 ```
 
 2. Configure the camera:

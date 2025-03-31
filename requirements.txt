@@ -1,6 +1,8 @@
 # Python package dependencies
 picamera2>=0.3.16
 astral>=3.2
+paho-mqtt>=1.6.1
+Pillow>=10.0.0  # For image processing
 
 # System dependencies (install with apt)
-# sudo apt install python3-libcamera python3-picamera2 python3-astral ffmpeg
+# sudo apt install python3-libcamera python3-picamera2 python3-astral python3-paho-mqtt python3-pil ffmpeg
