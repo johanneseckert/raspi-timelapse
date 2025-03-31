@@ -229,6 +229,7 @@ class HomeAssistantMQTT:
 			"unique_id": f"{self.device_name}_latest_photo",
 			"topic": f"{self.device_name}/camera/image",
 			"encoding": "base64",
+			"content_type": "image/jpeg",
 			"device": self.device_info,
 			"availability_topic": f"{self.device_name}/status"
 		}
@@ -389,6 +390,11 @@ class TimelapseCamera:
 
 						# Convert to base64
 						img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
+						img_size_kb = len(img_byte_arr) / 1024
+
+						# Log size information
+						logger.info(f"Image size before base64: {img_size_kb:.1f}KB")
+						logger.info(f"Image dimensions after resize: {new_size[0]}x{new_size[1]}")
 
 						# Publish to MQTT
 						topic = f"{self.ha_mqtt.device_name}/camera/image"
