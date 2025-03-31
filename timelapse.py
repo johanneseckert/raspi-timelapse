@@ -243,7 +243,9 @@ class HomeAssistantMQTT:
 			"unique_id": f"{self.device_name}_uptime",
 			"state_topic": f"{self.device_name}/state/uptime",
 			"device": self.device_info,
-			"unit_of_measurement": "seconds",
+			"unit_of_measurement": "minutes",
+			"device_class": "duration",
+			"state_class": "measurement",
 			"availability_topic": f"{self.device_name}/status"
 		}
 		topic = f"{self.base_topic}/sensor/{self.device_name}/uptime/config"
@@ -400,8 +402,8 @@ class TimelapseCamera:
 						logger.info(f"Publishing resized image ({len(img_base64)} bytes) to {topic}")
 						self.ha_mqtt.client.publish(topic, img_base64, retain=True)
 
-						# Publish timestamp in ISO format
-						now = datetime.now().isoformat()
+						# Publish timestamp in ISO format with timezone
+						now = datetime.now().astimezone().isoformat()
 						self.ha_mqtt.publish_state("last_capture", now)
 
 						# Also publish the path for reference
@@ -434,9 +436,9 @@ class TimelapseCamera:
 	def update_ha_status(self):
 		"""Update Home Assistant with current status"""
 		if self.ha_mqtt:
-			# Update uptime
-			uptime = int(time.time() - self.start_time)
-			self.ha_mqtt.publish_state("uptime", str(uptime))
+			# Update uptime (convert to minutes)
+			uptime_minutes = int((time.time() - self.start_time) / 60)
+			self.ha_mqtt.publish_state("uptime", str(uptime_minutes))
 
 			# Update capture state
 			self.ha_mqtt.publish_state("capture", "ON" if self.capturing_enabled else "OFF")
