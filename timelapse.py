@@ -274,9 +274,8 @@ class HomeAssistantMQTT:
 			return
 
 		topic = f"{self.device_name}/state/{entity_type}"
-		payload = json.dumps({"state": state})
-		logger.info(f"Publishing to {topic}: {payload}")
-		result, mid = self.client.publish(topic, payload, retain=True)
+		logger.info(f"Publishing to {topic}: {state}")
+		result, mid = self.client.publish(topic, state, retain=True)
 		logger.info(f"Publish result: {result} (0=success) with message ID: {mid}")
 
 	def disconnect(self):
