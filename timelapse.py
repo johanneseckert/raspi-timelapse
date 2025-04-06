@@ -61,6 +61,7 @@ from flask import Flask, render_template, Response, jsonify, request
 import cv2
 from libcamera import controls
 import numpy as np
+import libcamera
 
 def load_config():
 	"""Load configuration from JSON file"""
@@ -457,10 +458,15 @@ class TimelapseCamera:
 			self.preview_mode = True
 			# Configure camera for preview (lower res for performance)
 			preview_config = self.camera.create_preview_configuration(
-				main={"size": (640, 480)},
+				main={"size": (640, 480), "format": "RGB888"},
+				transform=libcamera.Transform(hflip=0, vflip=0),
+				colour_space=libcamera.ColorSpace.Rec709(),
+				buffer_count=4,
 				controls={"FrameDurationLimits": (33333, 33333)}
 			)
 			self.camera.configure(preview_config)
+			# Allow time for AWB and exposure to settle
+			time.sleep(0.5)
 
 	def stop_preview(self):
 		"""Switch back to capture mode"""
@@ -468,7 +474,10 @@ class TimelapseCamera:
 			self.preview_mode = False
 			# Restore full resolution configuration
 			capture_config = self.camera.create_still_configuration(
-				main={"size": (3840, 2160)},
+				main={"size": (3840, 2160), "format": "RGB888"},
+				transform=libcamera.Transform(hflip=0, vflip=0),
+				colour_space=libcamera.ColorSpace.Rec709(),
+				buffer_count=1,
 				controls={"FrameDurationLimits": (33333, 33333)}
 			)
 			self.camera.configure(capture_config)
@@ -478,7 +487,11 @@ class TimelapseCamera:
 		with self.preview_lock:
 			if not self.preview_mode:
 				return None
-			return self.camera.capture_array()
+			# Capture and convert to BGR for OpenCV
+			frame = self.camera.capture_array()
+			# Convert RGB to BGR for OpenCV
+			frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+			return frame
 
 	def take_photo(self):
 		"""Capture a single photo with timestamp"""
