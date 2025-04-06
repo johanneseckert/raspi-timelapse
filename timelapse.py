@@ -42,7 +42,8 @@ TODO: Home Assistant Integration
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+import zoneinfo
 from pathlib import Path
 import logging
 import json
@@ -370,34 +371,43 @@ class CameraWebInterface:
 
 		@self.app.route('/status')
 		def status():
-			current_time = datetime.now(tz=timezone(self.camera.config['location']['timezone']))
-			start_time, end_time = self.camera.get_sun_times()
+			try:
+				# Get timezone from config
+				tz = zoneinfo.ZoneInfo(self.camera.config['location']['timezone'])
+				current_time = datetime.now(tz)
+				start_time, end_time = self.camera.get_sun_times()
 
-			status_info = {
-				'capturing_enabled': self.camera.capturing_enabled,
-				'preview_mode': self.camera.preview_mode,
-				'last_capture_time': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S") if self.camera.last_capture_time else None,
-				'uptime_minutes': int((time.time() - self.camera.start_time) / 60),
-				'sun_times': {
-					'start': start_time.strftime("%H:%M"),
-					'end': end_time.strftime("%H:%M")
-				},
-				'status_message': None
-			}
+				status_info = {
+					'capturing_enabled': self.camera.capturing_enabled,
+					'preview_mode': self.camera.preview_mode,
+					'last_capture_time': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S") if self.camera.last_capture_time else None,
+					'uptime_minutes': int((time.time() - self.camera.start_time) / 60),
+					'sun_times': {
+						'start': start_time.strftime("%H:%M"),
+						'end': end_time.strftime("%H:%M")
+					},
+					'status_message': None
+				}
 
-			# Determine status message
-			if current_time < start_time:
-				status_info['status_message'] = f"Waiting for sunrise capture time ({start_time.strftime('%H:%M')})"
-			elif current_time > end_time:
-				status_info['status_message'] = f"Capture ended for today (sunset was at {end_time.strftime('%H:%M')})"
-			elif not self.camera.capturing_enabled:
-				status_info['status_message'] = "Capture manually disabled"
-			elif self.camera.preview_mode:
-				status_info['status_message'] = "Live preview mode active"
-			else:
-				status_info['status_message'] = "Capturing enabled"
+				# Determine status message
+				if current_time < start_time:
+					status_info['status_message'] = f"Waiting for sunrise capture time ({start_time.strftime('%H:%M')})"
+				elif current_time > end_time:
+					status_info['status_message'] = f"Capture ended for today (sunset was at {end_time.strftime('%H:%M')})"
+				elif not self.camera.capturing_enabled:
+					status_info['status_message'] = "Capture manually disabled"
+				elif self.camera.preview_mode:
+					status_info['status_message'] = "Live preview mode active"
+				else:
+					status_info['status_message'] = "Capturing enabled"
 
-			return jsonify(status_info)
+				return jsonify(status_info)
+			except Exception as e:
+				logger.error(f"Error getting status: {e}", exc_info=True)
+				return jsonify({
+					'error': 'Failed to get status',
+					'message': str(e)
+				}), 500
 
 		@self.app.route('/capture/start', methods=['POST'])
 		def start_capture():
@@ -551,17 +561,17 @@ class TimelapseCamera:
 	def get_sun_times(self):
 		"""Calculate sunrise and sunset times for the current day"""
 		try:
-			# Create location info with timezone
+			# Get timezone
+			tz = zoneinfo.ZoneInfo(self.config['location']['timezone'])
+			today = datetime.now(tz).date()
+
+			# Create location info
 			location = LocationInfo(
 				name="Camera Location",
 				latitude=self.config['location']['latitude'],
 				longitude=self.config['location']['longitude'],
 				timezone=self.config['location']['timezone']
 			)
-
-			# Get current date in the correct timezone
-			tz = timezone(self.config['location']['timezone'])
-			today = datetime.now(tz).date()
 
 			# Calculate sun times for today
 			s = sun(location.observer, date=today)
@@ -578,8 +588,7 @@ class TimelapseCamera:
 
 			return start_time, end_time
 		except Exception as e:
-			logger.error(f"Failed to calculate sun times: {e}")
-			logger.error("Stack trace:", exc_info=True)
+			logger.error(f"Failed to calculate sun times: {e}", exc_info=True)
 			raise
 
 	def load_service_state(self):
@@ -623,11 +632,12 @@ class TimelapseCamera:
 			self.camera.stop()
 
 			self.preview_mode = True
-			# Configure camera for preview (lower res for performance)
+			# Configure camera for preview with more stable settings
 			preview_config = self.camera.create_preview_configuration(
-				main={"size": (640, 480)},  # Simplified configuration
-				transform=libcamera.Transform(hflip=0, vflip=0),
-				buffer_count=1  # Reduce buffer count
+				main={"size": (1920, 1080), "format": "BGR888"},
+				raw={"size": self.camera.sensor_resolution},
+				buffer_count=4,
+				controls={"FrameDurationLimits": (33333, 33333)}
 			)
 			self.camera.configure(preview_config)
 
@@ -812,7 +822,7 @@ class TimelapseCamera:
 
 				# Get sun times and ensure current time is in the same timezone
 				start_time, end_time = self.get_sun_times()
-				tz = timezone(self.config['location']['timezone'])
+				tz = zoneinfo.ZoneInfo(self.config['location']['timezone'])
 				current_time = datetime.now(tz)
 
 				# Log current status for debugging
