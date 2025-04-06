@@ -551,20 +551,35 @@ class TimelapseCamera:
 	def get_sun_times(self):
 		"""Calculate sunrise and sunset times for the current day"""
 		try:
+			# Create location info with timezone
 			location = LocationInfo(
+				name="Camera Location",
 				latitude=self.config['location']['latitude'],
 				longitude=self.config['location']['longitude'],
 				timezone=self.config['location']['timezone']
 			)
-			s = sun(location.observer, date=datetime.now())
 
+			# Get current date in the correct timezone
+			tz = timezone(self.config['location']['timezone'])
+			today = datetime.now(tz).date()
+
+			# Calculate sun times for today
+			s = sun(location.observer, date=today)
+
+			# All sun times are already timezone-aware
 			start_time = s['sunrise'] - timedelta(hours=self.config['camera']['hours_before_sunrise'])
 			end_time = s['sunset'] + timedelta(hours=self.config['camera']['hours_after_sunset'])
-			logger.info(f"Today's recording from {start_time.strftime('%Y-%m-%d %H:%M:%S')} to {end_time.strftime('%Y-%m-%d %H:%M:%S')} ")
+
+			logger.info(f"Today's recording schedule:")
+			logger.info(f"  Sunrise: {s['sunrise'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
+			logger.info(f"  Sunset: {s['sunset'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
+			logger.info(f"  Start time: {start_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+			logger.info(f"  End time: {end_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
 			return start_time, end_time
 		except Exception as e:
 			logger.error(f"Failed to calculate sun times: {e}")
+			logger.error("Stack trace:", exc_info=True)
 			raise
 
 	def load_service_state(self):
@@ -795,16 +810,22 @@ class TimelapseCamera:
 			try:
 				self.update_ha_status()  # Update Home Assistant status
 
+				# Get sun times and ensure current time is in the same timezone
 				start_time, end_time = self.get_sun_times()
-				current_time = datetime.now(start_time.tzinfo)
+				tz = timezone(self.config['location']['timezone'])
+				current_time = datetime.now(tz)
+
+				# Log current status for debugging
+				logger.info(f"Current time: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+				logger.info(f"Capture window: {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
+				logger.info(f"Capture enabled: {self.capturing_enabled}")
 
 				if start_time <= current_time <= end_time and self.capturing_enabled:
+					logger.info("Within capture window - taking photo")
 					self.take_photo()
 					time.sleep(self.config['camera']['interval_minutes'] * 60)
 				elif current_time > end_time:
-					# Video creation temporarily disabled for stability testing
-					logger.info("Video creation temporarily disabled for stability testing")
-					# Wait until next day
+					# Calculate time until next day's start
 					tomorrow = current_time + timedelta(days=1)
 					tomorrow_start = tomorrow.replace(
 						hour=start_time.hour,
@@ -813,21 +834,22 @@ class TimelapseCamera:
 						microsecond=0
 					)
 					sleep_seconds = min((tomorrow_start - current_time).total_seconds(), 60)
-					logger.info(f"Waiting {sleep_seconds/3600:.1f} hours until next day")
+					logger.info(f"After end time - waiting {sleep_seconds/3600:.1f} hours until next day")
 					time.sleep(sleep_seconds)
-					self.update_ha_status()  # Update status after long sleep
+					self.update_ha_status()
 				else:
-					# Wait until start time or until capturing is enabled
+					# Wait until start time
 					sleep_seconds = min(
 						(start_time - current_time).total_seconds(),
 						60  # Check status every minute
 					)
-					logger.info(f"Waiting {sleep_seconds/3600:.1f} hours until start time")
+					logger.info(f"Before start time - waiting {sleep_seconds/3600:.1f} hours")
 					time.sleep(sleep_seconds)
-					self.update_ha_status()  # Update status after sleep
+					self.update_ha_status()
 
 			except Exception as e:
 				logger.error(f"Error in main loop: {e}")
+				logger.error("Stack trace:", exc_info=True)
 				time.sleep(60)  # Wait a minute before retrying
 
 	def cleanup(self):
