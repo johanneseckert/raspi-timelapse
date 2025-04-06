@@ -306,7 +306,47 @@ class CameraWebInterface:
 				last_capture_time = self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S")
 			return render_template('index.html',
 								capturing=self.camera.capturing_enabled,
+								preview_mode=self.camera.preview_mode,
 								last_capture_time=last_capture_time)
+
+		@self.app.route('/status')
+		def status():
+			return jsonify({
+				'capturing_enabled': self.camera.capturing_enabled,
+				'preview_mode': self.camera.preview_mode,
+				'last_capture_time': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S") if self.camera.last_capture_time else None,
+				'uptime_minutes': int((time.time() - self.camera.start_time) / 60)
+			})
+
+		@self.app.route('/capture/start', methods=['POST'])
+		def start_capture():
+			if self.camera.preview_mode:
+				return jsonify({'error': 'Cannot start capture while in preview mode'}), 400
+			self.camera.start_capture()
+			return jsonify({'success': True, 'capturing': True})
+
+		@self.app.route('/capture/stop', methods=['POST'])
+		def stop_capture():
+			self.camera.stop_capture()
+			return jsonify({'success': True, 'capturing': False})
+
+		@self.app.route('/mode/preview', methods=['POST'])
+		def set_preview_mode():
+			self.camera.start_preview()
+			return jsonify({
+				'success': True,
+				'preview_mode': True,
+				'capturing_enabled': self.camera.capturing_enabled
+			})
+
+		@self.app.route('/mode/capture', methods=['POST'])
+		def set_capture_mode():
+			self.camera.stop_preview()
+			return jsonify({
+				'success': True,
+				'preview_mode': False,
+				'capturing_enabled': self.camera.capturing_enabled
+			})
 
 		@self.app.route('/stream')
 		def stream():
@@ -330,18 +370,6 @@ class CameraWebInterface:
 					'timestamp': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S")
 				})
 			return jsonify({'timestamp': 'No captures yet'})
-
-		@self.app.route('/mode/preview', methods=['POST'])
-		def set_preview_mode():
-			self.camera.start_preview()
-			self.camera.capturing_enabled = False
-			return jsonify({'success': True})
-
-		@self.app.route('/mode/capture', methods=['POST'])
-		def set_capture_mode():
-			self.camera.stop_preview()
-			self.camera.capturing_enabled = True
-			return jsonify({'success': True})
 
 		@self.app.route('/focus/set', methods=['POST'])
 		def set_focus():
@@ -389,6 +417,8 @@ class TimelapseCamera:
 		self.preview_lock = threading.Lock()
 		self.last_capture_time = None
 		self.last_capture_path = None
+		self.service_state_file = self.base_dir / "service_state.json"
+		self.load_service_state()
 
 		# Initialize MQTT connection
 		try:
@@ -452,9 +482,42 @@ class TimelapseCamera:
 			logger.error(f"Failed to calculate sun times: {e}")
 			raise
 
+	def load_service_state(self):
+		"""Load service state from file"""
+		try:
+			if self.service_state_file.exists():
+				with open(self.service_state_file, 'r') as f:
+					state = json.load(f)
+					self.capturing_enabled = state.get('capturing_enabled', True)
+					logger.info(f"Loaded service state: capturing_enabled={self.capturing_enabled}")
+			else:
+				self.save_service_state()
+		except Exception as e:
+			logger.error(f"Error loading service state: {e}")
+
+	def save_service_state(self):
+		"""Save service state to file"""
+		try:
+			state = {
+				'capturing_enabled': self.capturing_enabled,
+				'last_update': datetime.now().isoformat()
+			}
+			with open(self.service_state_file, 'w') as f:
+				json.dump(state, f)
+			logger.info(f"Saved service state: capturing_enabled={self.capturing_enabled}")
+		except Exception as e:
+			logger.error(f"Error saving service state: {e}")
+
 	def start_preview(self):
 		"""Switch to preview mode"""
 		with self.preview_lock:
+			# Temporarily disable capturing while in preview mode
+			was_capturing = self.capturing_enabled
+			if was_capturing:
+				logger.info("Temporarily disabling capture for preview mode")
+				self.capturing_enabled = False
+				self.save_service_state()
+
 			self.preview_mode = True
 			# Configure camera for preview (lower res for performance)
 			preview_config = self.camera.create_preview_configuration(
@@ -481,6 +544,10 @@ class TimelapseCamera:
 				controls={"FrameDurationLimits": (33333, 33333)}
 			)
 			self.camera.configure(capture_config)
+
+			# Restore previous capture state
+			self.load_service_state()
+			logger.info(f"Restored capture state: capturing_enabled={self.capturing_enabled}")
 
 	def get_preview_frame(self):
 		"""Get a frame for the web preview"""
@@ -704,10 +771,16 @@ class TimelapseCamera:
 			return False
 
 	def start_capture(self):
+		"""Enable capture mode"""
 		self.capturing_enabled = True
+		self.save_service_state()
+		logger.info("Capture mode enabled")
 
 	def stop_capture(self):
+		"""Disable capture mode"""
 		self.capturing_enabled = False
+		self.save_service_state()
+		logger.info("Capture mode disabled")
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Timelapse Camera Control')
@@ -715,17 +788,28 @@ if __name__ == "__main__":
 	parser.add_argument('--no-video', action='store_true', help='Skip video creation in test mode')
 	parser.add_argument('--web', action='store_true', help='Start web interface')
 	parser.add_argument('--web-port', type=int, default=8000, help='Web interface port')
+	parser.add_argument('--capture', action='store_true', help='Run in capture mode (based on sunrise/sunset)')
 	args = parser.parse_args()
 
 	camera = TimelapseCamera(test_mode=args.test, skip_video=args.no_video)
 
-	if args.web:
-		web_interface = CameraWebInterface(camera, port=args.web_port)
-		web_thread = threading.Thread(target=web_interface.run)
-		web_thread.daemon = True
-		web_thread.start()
-
 	try:
-		camera.run()
+		if args.web and args.capture:
+			# Run both web interface and capture
+			web_interface = CameraWebInterface(camera, port=args.web_port)
+			web_thread = threading.Thread(target=web_interface.run)
+			web_thread.daemon = True
+			web_thread.start()
+			camera.run()
+		elif args.web:
+			# Run only web interface
+			web_interface = CameraWebInterface(camera, port=args.web_port)
+			camera.capturing_enabled = False  # Start with capture disabled
+			web_interface.run()  # This will block
+		elif args.capture:
+			# Run only capture functionality
+			camera.run()
+		else:
+			parser.print_help()
 	finally:
 		camera.cleanup()
