@@ -300,7 +300,7 @@ class CameraWebInterface:
 	def setup_routes(self):
 		@self.app.route('/')
 		def index():
-			return render_template('index.html', capturing=self.camera.capturing)
+			return render_template('index.html', capturing=self.camera.capturing_enabled)
 
 		@self.app.route('/stream')
 		def stream():
@@ -314,11 +314,11 @@ class CameraWebInterface:
 
 		@self.app.route('/capture/toggle', methods=['POST'])
 		def toggle_capture():
-			if self.camera.capturing:
+			if self.camera.capturing_enabled:
 				self.camera.stop_capture()
 			else:
 				self.camera.start_capture()
-			return jsonify({'capturing': self.camera.capturing})
+			return jsonify({'capturing': self.camera.capturing_enabled})
 
 		@self.app.route('/focus/set', methods=['POST'])
 		def set_focus():
