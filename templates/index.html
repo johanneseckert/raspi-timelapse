@@ -20,10 +20,35 @@
             border-radius: 8px;
             overflow: hidden;
             position: relative;
+            /* Force 16:9 aspect ratio */
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .preview-container img {
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: contain;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        /* Add a message for when image is not available */
+        .preview-container::after {
+            content: "No image available";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+            display: none;
+        }
+        .preview-container.no-image::after {
+            display: block;
+        }
+        .preview-container.no-image img {
+            opacity: 0;
         }
         .controls {
             background: white;
@@ -163,7 +188,9 @@
             <div class="status">
                 <h3>System Status</h3>
                 <p>Current Mode: <span id="currentMode">Capture Mode</span></p>
+                <p>Status: <span id="statusMessage">Loading...</span></p>
                 <p>Last Capture: <span id="lastCaptureTime">{{ last_capture_time }}</span></p>
+                <p>Capture Hours: <span id="captureHours">Loading...</span></p>
             </div>
         </div>
     </div>
@@ -256,20 +283,52 @@
             }
         }
 
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                document.getElementById('statusMessage').textContent = data.status_message;
+                document.getElementById('lastCaptureTime').textContent = data.last_capture_time || 'No captures yet';
+                document.getElementById('captureHours').textContent =
+                    `${data.sun_times.start} - ${data.sun_times.end}`;
+
+                // Update preview container if no image
+                const previewContainer = document.querySelector('.preview-container');
+                if (!data.last_capture_time && !isPreviewMode) {
+                    previewContainer.classList.add('no-image');
+                } else {
+                    previewContainer.classList.remove('no-image');
+                }
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+
+        // Update status every 30 seconds
+        setInterval(updateStatus, 30000);
+
+        // Initial status update
+        updateStatus();
+
         // Update last capture time periodically
         async function updateLastCaptureTime() {
             if (isPreviewMode) return;
 
             try {
-                const response = await fetch('/last_capture_time');
-                const data = await response.json();
-                document.getElementById('lastCaptureTime').textContent = data.timestamp;
-
-                // Also refresh the last capture image
+                // Refresh the last capture image
                 const timestamp = new Date().getTime();
-                lastCapture.src = `/last_image?t=${timestamp}`;
+                const response = await fetch(`/last_image?t=${timestamp}`);
+
+                if (response.ok) {
+                    lastCapture.src = `/last_image?t=${timestamp}`;
+                    document.querySelector('.preview-container').classList.remove('no-image');
+                } else {
+                    document.querySelector('.preview-container').classList.add('no-image');
+                }
             } catch (error) {
-                console.error('Error updating last capture time:', error);
+                console.error('Error updating last capture:', error);
+                document.querySelector('.preview-container').classList.add('no-image');
             }
         }
 

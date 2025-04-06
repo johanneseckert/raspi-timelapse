@@ -42,7 +42,7 @@ TODO: Home Assistant Integration
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import logging
 import json
@@ -338,12 +338,34 @@ class CameraWebInterface:
 
 		@self.app.route('/status')
 		def status():
-			return jsonify({
+			current_time = datetime.now(tz=timezone(self.camera.config['location']['timezone']))
+			start_time, end_time = self.camera.get_sun_times()
+
+			status_info = {
 				'capturing_enabled': self.camera.capturing_enabled,
 				'preview_mode': self.camera.preview_mode,
 				'last_capture_time': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S") if self.camera.last_capture_time else None,
-				'uptime_minutes': int((time.time() - self.camera.start_time) / 60)
-			})
+				'uptime_minutes': int((time.time() - self.camera.start_time) / 60),
+				'sun_times': {
+					'start': start_time.strftime("%H:%M"),
+					'end': end_time.strftime("%H:%M")
+				},
+				'status_message': None
+			}
+
+			# Determine status message
+			if current_time < start_time:
+				status_info['status_message'] = f"Waiting for sunrise capture time ({start_time.strftime('%H:%M')})"
+			elif current_time > end_time:
+				status_info['status_message'] = f"Capture ended for today (sunset was at {end_time.strftime('%H:%M')})"
+			elif not self.camera.capturing_enabled:
+				status_info['status_message'] = "Capture manually disabled"
+			elif self.camera.preview_mode:
+				status_info['status_message'] = "Live preview mode active"
+			else:
+				status_info['status_message'] = "Capturing enabled"
+
+			return jsonify(status_info)
 
 		@self.app.route('/capture/start', methods=['POST'])
 		def start_capture():
@@ -384,6 +406,10 @@ class CameraWebInterface:
 		def last_image():
 			if hasattr(self.camera, 'last_capture_path') and self.camera.last_capture_path:
 				try:
+					if not Path(self.camera.last_capture_path).exists():
+						logger.warning(f"Last capture file not found: {self.camera.last_capture_path}")
+						return Response(status=404)
+
 					with open(self.camera.last_capture_path, 'rb') as f:
 						return Response(f.read(), mimetype='image/jpeg')
 				except Exception as e:
