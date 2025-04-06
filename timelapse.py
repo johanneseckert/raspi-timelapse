@@ -321,7 +321,7 @@ class TimelapseCamera:
 	def setup_camera(self):
 		"""Initialize camera settings"""
 		try:
-			# Configure camera for 1080p
+			# Configure camera for 4K
 			camera_config = self.camera.create_still_configuration(
 				main={"size": (
 					self.config['camera']['resolution']['width'],
@@ -380,8 +380,8 @@ class TimelapseCamera:
 				try:
 					# Open and resize image
 					with Image.open(filepath) as img:
-						# Calculate new size (1/4 of original)
-						new_size = (img.width // 4, img.height // 4)
+						# Calculate new size (1/8 of original)
+						new_size = (img.width // 8, img.height // 8)
 						resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
 
 						# Convert to JPEG bytes
