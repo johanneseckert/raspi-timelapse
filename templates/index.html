@@ -60,9 +60,24 @@
             flex: 1;
             padding: 15px;
             font-size: 1.1em;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
-        .mode-toggle .active {
+        .mode-toggle button.active {
             background-color: #28a745;
+        }
+        .mode-toggle button.inactive {
+            background-color: #dc3545;
+            opacity: 0.7;
+        }
+        .mode-toggle button .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
         }
         .controls {
             display: flex;
@@ -70,12 +85,29 @@
             margin: 20px 0;
             flex-wrap: wrap;
         }
+        .controls.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .controls.disabled::after {
+            content: "Focus control only available in Live Preview mode";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
         .control-group {
             flex: 1;
             min-width: 200px;
             padding: 15px;
             background-color: #f8f8f8;
             border-radius: 4px;
+            position: relative;
         }
         .image-grid {
             display: grid;
@@ -147,8 +179,14 @@
 
         <div class="mode-toggle">
             <h3 style="margin: 0">Mode:</h3>
-            <button onclick="setMode('preview')" id="previewModeBtn">Live Preview</button>
-            <button onclick="setMode('capture')" id="captureModeBtn" class="active">Capture</button>
+            <button onclick="setMode('preview')" id="previewModeBtn">
+                <span class="status-dot"></span>
+                Live Preview
+            </button>
+            <button onclick="setMode('capture')" id="captureModeBtn" class="active">
+                <span class="status-dot"></span>
+                Capture
+            </button>
         </div>
 
         <div class="image-grid">
@@ -168,7 +206,7 @@
             </div>
         </div>
 
-        <div class="controls">
+        <div class="controls" id="focusControls">
             <div class="control-group">
                 <h3>Focus Control</h3>
                 <div class="focus-controls">
@@ -184,7 +222,7 @@
             <h3>Status</h3>
             <p>
                 <span class="status-indicator {{ 'status-active' if capturing else 'status-inactive' }}"></span>
-                Mode: <span id="statusText">{{ 'Capture' if capturing else 'Live Preview' }}</span>
+                Active Mode: <span id="statusText">{{ 'Capture' if capturing else 'Live Preview' }}</span>
             </p>
             <p>Focus Mode: <span id="focusMode">Auto</span></p>
         </div>
@@ -193,10 +231,24 @@
     <script>
         let currentMode = 'capture';
 
-        function setMode(mode) {
-            const previewContainer = document.getElementById('previewContainer');
+        function updateModeButtons(mode) {
             const previewModeBtn = document.getElementById('previewModeBtn');
             const captureModeBtn = document.getElementById('captureModeBtn');
+            const focusControls = document.getElementById('focusControls');
+
+            if (mode === 'preview') {
+                previewModeBtn.className = 'active';
+                captureModeBtn.className = 'inactive';
+                focusControls.classList.remove('disabled');
+            } else {
+                previewModeBtn.className = 'inactive';
+                captureModeBtn.className = 'active';
+                focusControls.classList.add('disabled');
+            }
+        }
+
+        function setMode(mode) {
+            const previewContainer = document.getElementById('previewContainer');
 
             if (mode === 'preview') {
                 fetch('/mode/preview', {method: 'POST'})
@@ -205,8 +257,7 @@
                         if (data.success) {
                             currentMode = 'preview';
                             previewContainer.classList.remove('disabled');
-                            previewModeBtn.classList.add('active');
-                            captureModeBtn.classList.remove('active');
+                            updateModeButtons('preview');
                             document.getElementById('statusText').textContent = 'Live Preview';
                             document.querySelector('.status-indicator').className = 'status-indicator status-inactive';
                         }
@@ -218,8 +269,7 @@
                         if (data.success) {
                             currentMode = 'capture';
                             previewContainer.classList.add('disabled');
-                            previewModeBtn.classList.remove('active');
-                            captureModeBtn.classList.add('active');
+                            updateModeButtons('capture');
                             document.getElementById('statusText').textContent = 'Capture';
                             document.querySelector('.status-indicator').className = 'status-indicator status-active';
                         }
@@ -228,6 +278,8 @@
         }
 
         function setFocus(value) {
+            if (currentMode !== 'preview') return;
+
             fetch('/focus/set', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -238,6 +290,8 @@
         }
 
         function setAutoFocus() {
+            if (currentMode !== 'preview') return;
+
             fetch('/focus/auto', {method: 'POST'})
                 .then(() => {
                     document.getElementById('focusMode').textContent = 'Auto';

@@ -658,17 +658,37 @@ class TimelapseCamera:
 			logger.error(f"Error during cleanup: {e}")
 
 	def set_focus(self, value):
+		"""Set manual focus value"""
 		with self.preview_lock:
+			if not self.preview_mode:
+				logger.warning("Cannot set focus while not in preview mode")
+				return False
 			if self.camera:
-				# Convert 0-100 value to appropriate focus range
-				focus_value = int((value / 100.0) * 1000)  # Adjust range as needed
-				self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual,
-										"LensPosition": focus_value})
+				try:
+					# Convert 0-100 value to appropriate focus range
+					focus_value = int((value / 100.0) * 1000)  # Adjust range as needed
+					self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual,
+											"LensPosition": focus_value})
+					return True
+				except Exception as e:
+					logger.error(f"Error setting focus: {e}")
+					return False
+			return False
 
 	def set_auto_focus(self):
+		"""Enable auto focus"""
 		with self.preview_lock:
+			if not self.preview_mode:
+				logger.warning("Cannot set focus while not in preview mode")
+				return False
 			if self.camera:
-				self.camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+				try:
+					self.camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+					return True
+				except Exception as e:
+					logger.error(f"Error setting auto focus: {e}")
+					return False
+			return False
 
 	def start_capture(self):
 		self.capturing_enabled = True
