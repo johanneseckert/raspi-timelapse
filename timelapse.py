@@ -518,6 +518,10 @@ class TimelapseCamera:
 				self.capturing_enabled = False
 				self.save_service_state()
 
+			# Stop camera before reconfiguring
+			logger.info("Stopping camera for preview mode configuration")
+			self.camera.stop()
+
 			self.preview_mode = True
 			# Configure camera for preview (lower res for performance)
 			preview_config = self.camera.create_preview_configuration(
@@ -528,6 +532,11 @@ class TimelapseCamera:
 				controls={"FrameDurationLimits": (33333, 33333)}
 			)
 			self.camera.configure(preview_config)
+
+			# Restart camera with new configuration
+			logger.info("Starting camera in preview mode")
+			self.camera.start()
+
 			# Allow time for AWB and exposure to settle
 			time.sleep(0.5)
 
@@ -535,6 +544,11 @@ class TimelapseCamera:
 		"""Switch back to capture mode"""
 		with self.preview_lock:
 			self.preview_mode = False
+
+			# Stop camera before reconfiguring
+			logger.info("Stopping camera for capture mode configuration")
+			self.camera.stop()
+
 			# Restore full resolution configuration
 			capture_config = self.camera.create_still_configuration(
 				main={"size": (3840, 2160), "format": "RGB888"},
@@ -545,6 +559,10 @@ class TimelapseCamera:
 			)
 			self.camera.configure(capture_config)
 
+			# Restart camera with new configuration
+			logger.info("Starting camera in capture mode")
+			self.camera.start()
+
 			# Restore previous capture state
 			self.load_service_state()
 			logger.info(f"Restored capture state: capturing_enabled={self.capturing_enabled}")
@@ -554,11 +572,15 @@ class TimelapseCamera:
 		with self.preview_lock:
 			if not self.preview_mode:
 				return None
-			# Capture and convert to BGR for OpenCV
-			frame = self.camera.capture_array()
-			# Convert RGB to BGR for OpenCV
-			frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-			return frame
+			try:
+				# Capture and convert to BGR for OpenCV
+				frame = self.camera.capture_array()
+				# Convert RGB to BGR for OpenCV
+				frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+				return frame
+			except Exception as e:
+				logger.error(f"Error capturing preview frame: {e}")
+				return None
 
 	def take_photo(self):
 		"""Capture a single photo with timestamp"""
