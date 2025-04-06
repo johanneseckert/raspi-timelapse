@@ -300,25 +300,47 @@ class CameraWebInterface:
 	def setup_routes(self):
 		@self.app.route('/')
 		def index():
-			return render_template('index.html', capturing=self.camera.capturing_enabled)
+			last_capture_time = "No captures yet"
+			if hasattr(self.camera, 'last_capture_time') and self.camera.last_capture_time:
+				last_capture_time = self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S")
+			return render_template('index.html',
+								capturing=self.camera.capturing_enabled,
+								last_capture_time=last_capture_time)
 
 		@self.app.route('/stream')
 		def stream():
 			return Response(self.generate_frames(),
 						  mimetype='multipart/x-mixed-replace; boundary=frame')
 
-		@self.app.route('/stop_stream', methods=['POST'])
-		def stop_stream():
-			self.camera.stop_preview()
-			return jsonify({'status': 'success'})
+		@self.app.route('/last_image')
+		def last_image():
+			if hasattr(self.camera, 'last_capture_path') and self.camera.last_capture_path:
+				try:
+					with open(self.camera.last_capture_path, 'rb') as f:
+						return Response(f.read(), mimetype='image/jpeg')
+				except Exception as e:
+					logger.error(f"Error reading last captured image: {e}")
+			return Response(status=404)
 
-		@self.app.route('/capture/toggle', methods=['POST'])
-		def toggle_capture():
-			if self.camera.capturing_enabled:
-				self.camera.stop_capture()
-			else:
-				self.camera.start_capture()
-			return jsonify({'capturing': self.camera.capturing_enabled})
+		@self.app.route('/last_capture_time')
+		def last_capture_time():
+			if hasattr(self.camera, 'last_capture_time') and self.camera.last_capture_time:
+				return jsonify({
+					'timestamp': self.camera.last_capture_time.strftime("%Y-%m-%d %H:%M:%S")
+				})
+			return jsonify({'timestamp': 'No captures yet'})
+
+		@self.app.route('/mode/preview', methods=['POST'])
+		def set_preview_mode():
+			self.camera.start_preview()
+			self.camera.capturing_enabled = False
+			return jsonify({'success': True})
+
+		@self.app.route('/mode/capture', methods=['POST'])
+		def set_capture_mode():
+			self.camera.stop_preview()
+			self.camera.capturing_enabled = True
+			return jsonify({'success': True})
 
 		@self.app.route('/focus/set', methods=['POST'])
 		def set_focus():
@@ -364,6 +386,8 @@ class TimelapseCamera:
 		self.start_time = time.time()
 		self.preview_mode = False
 		self.preview_lock = threading.Lock()
+		self.last_capture_time = None
+		self.last_capture_path = None
 
 		# Initialize MQTT connection
 		try:
@@ -465,12 +489,16 @@ class TimelapseCamera:
 				self.stop_preview()
 
 			try:
-				timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-				filename = f"photo_{timestamp}.jpg"
+				timestamp = datetime.now()
+				filename = f"photo_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
 				filepath = self.photos_dir / filename
 
 				self.camera.capture_file(str(filepath))
 				logger.info(f"Photo captured: {filename}")
+
+				# Update last capture information
+				self.last_capture_time = timestamp
+				self.last_capture_path = str(filepath)
 
 				# Publish to Home Assistant
 				if self.ha_mqtt:
