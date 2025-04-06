@@ -296,6 +296,7 @@ class CameraWebInterface:
 		self.camera = camera_instance
 		self.app = Flask(__name__)
 		self.port = port
+		self.log_file = Path(config['paths']['base_dir']) / config['paths']['log_file']
 		self.setup_routes()
 
 	def setup_routes(self):
@@ -308,6 +309,32 @@ class CameraWebInterface:
 								capturing=self.camera.capturing_enabled,
 								preview_mode=self.camera.preview_mode,
 								last_capture_time=last_capture_time)
+
+		@self.app.route('/logs/latest')
+		def get_latest_log():
+			try:
+				# Get the last line from the log file
+				with open(self.log_file, 'r') as f:
+					lines = f.readlines()
+					if lines:
+						return jsonify({'line': lines[-1].strip()})
+					return jsonify({'line': 'No logs available'})
+			except Exception as e:
+				logger.error(f"Error reading latest log: {e}")
+				return jsonify({'line': 'Error reading logs'})
+
+		@self.app.route('/logs/recent')
+		def get_recent_logs():
+			try:
+				num_lines = min(int(request.args.get('lines', 100)), 1000)  # Cap at 1000 lines
+				with open(self.log_file, 'r') as f:
+					# Read all lines and get the last n lines
+					lines = f.readlines()
+					recent_logs = lines[-num_lines:] if len(lines) > num_lines else lines
+					return jsonify({'logs': [line.strip() for line in recent_logs]})
+			except Exception as e:
+				logger.error(f"Error reading recent logs: {e}")
+				return jsonify({'logs': ['Error reading logs']})
 
 		@self.app.route('/status')
 		def status():
@@ -525,11 +552,9 @@ class TimelapseCamera:
 			self.preview_mode = True
 			# Configure camera for preview (lower res for performance)
 			preview_config = self.camera.create_preview_configuration(
-				main={"size": (640, 480), "format": "RGB888"},
+				main={"size": (640, 480)},  # Simplified configuration
 				transform=libcamera.Transform(hflip=0, vflip=0),
-				colour_space=libcamera.ColorSpace.Rec709(),
-				buffer_count=4,
-				controls={"FrameDurationLimits": (33333, 33333)}
+				buffer_count=1  # Reduce buffer count
 			)
 			self.camera.configure(preview_config)
 
@@ -551,11 +576,9 @@ class TimelapseCamera:
 
 			# Restore full resolution configuration
 			capture_config = self.camera.create_still_configuration(
-				main={"size": (3840, 2160), "format": "RGB888"},
+				main={"size": (3840, 2160)},  # Simplified configuration
 				transform=libcamera.Transform(hflip=0, vflip=0),
-				colour_space=libcamera.ColorSpace.Rec709(),
-				buffer_count=1,
-				controls={"FrameDurationLimits": (33333, 33333)}
+				buffer_count=1  # Single buffer for capture
 			)
 			self.camera.configure(capture_config)
 

@@ -84,6 +84,62 @@
             border-radius: 8px;
             margin-top: 10px;
         }
+        .log-section {
+            margin-top: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .latest-log {
+            font-family: monospace;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .log-viewer {
+            display: none;
+            margin-top: 10px;
+        }
+        .log-viewer.expanded {
+            display: block;
+        }
+        .log-content {
+            font-family: monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .log-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .log-content::-webkit-scrollbar-track {
+            background: #2d2d2d;
+        }
+        .log-content::-webkit-scrollbar-thumb {
+            background: #666;
+            border-radius: 4px;
+        }
+        .toggle-logs {
+            background: none;
+            border: none;
+            color: #2196F3;
+            cursor: pointer;
+            padding: 0;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .toggle-logs:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -109,6 +165,15 @@
                 <p>Current Mode: <span id="currentMode">Capture Mode</span></p>
                 <p>Last Capture: <span id="lastCaptureTime">{{ last_capture_time }}</span></p>
             </div>
+        </div>
+    </div>
+
+    <div class="log-section">
+        <h3>System Logs</h3>
+        <div class="latest-log" id="latestLog">Loading latest log...</div>
+        <button class="toggle-logs" onclick="toggleLogs()">Show Full Logs</button>
+        <div class="log-viewer" id="logViewer">
+            <div class="log-content" id="logContent"></div>
         </div>
     </div>
 
@@ -213,6 +278,46 @@
 
         // Initial interface update
         updateInterface({{ 'true' if preview_mode else 'false' }});
+
+        // Log handling
+        async function updateLatestLog() {
+            try {
+                const response = await fetch('/logs/latest');
+                const data = await response.json();
+                document.getElementById('latestLog').textContent = data.line;
+            } catch (error) {
+                console.error('Error updating latest log:', error);
+            }
+        }
+
+        async function loadRecentLogs() {
+            try {
+                const response = await fetch('/logs/recent');
+                const data = await response.json();
+                document.getElementById('logContent').textContent = data.logs.join('\n');
+                // Scroll to bottom
+                const logContent = document.getElementById('logContent');
+                logContent.scrollTop = logContent.scrollHeight;
+            } catch (error) {
+                console.error('Error loading recent logs:', error);
+            }
+        }
+
+        function toggleLogs() {
+            const logViewer = document.getElementById('logViewer');
+            const toggleButton = document.querySelector('.toggle-logs');
+            const isExpanded = logViewer.classList.toggle('expanded');
+            toggleButton.textContent = isExpanded ? 'Hide Full Logs' : 'Show Full Logs';
+            if (isExpanded) {
+                loadRecentLogs();
+            }
+        }
+
+        // Update latest log every 2 seconds
+        setInterval(updateLatestLog, 2000);
+
+        // Initial log update
+        updateLatestLog();
     </script>
 </body>
 </html>
