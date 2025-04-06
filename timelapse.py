@@ -56,6 +56,11 @@ import paho.mqtt.client as mqtt
 from PIL import Image
 import io
 import base64
+import threading
+from flask import Flask, render_template, Response, jsonify, request
+import cv2
+from libcamera import controls
+import numpy as np
 
 def load_config():
 	"""Load configuration from JSON file"""
@@ -285,6 +290,61 @@ class HomeAssistantMQTT:
 		self.client.loop_stop()
 		self.client.disconnect()
 
+class CameraWebInterface:
+	def __init__(self, camera_instance, port=8000):
+		self.camera = camera_instance
+		self.app = Flask(__name__)
+		self.port = port
+		self.setup_routes()
+
+	def setup_routes(self):
+		@self.app.route('/')
+		def index():
+			return render_template('index.html', capturing=self.camera.capturing)
+
+		@self.app.route('/stream')
+		def stream():
+			return Response(self.generate_frames(),
+						  mimetype='multipart/x-mixed-replace; boundary=frame')
+
+		@self.app.route('/stop_stream', methods=['POST'])
+		def stop_stream():
+			self.camera.stop_preview()
+			return jsonify({'status': 'success'})
+
+		@self.app.route('/capture/toggle', methods=['POST'])
+		def toggle_capture():
+			if self.camera.capturing:
+				self.camera.stop_capture()
+			else:
+				self.camera.start_capture()
+			return jsonify({'capturing': self.camera.capturing})
+
+		@self.app.route('/focus/set', methods=['POST'])
+		def set_focus():
+			value = request.json.get('value', 50)
+			self.camera.set_focus(value)
+			return jsonify({'status': 'success'})
+
+		@self.app.route('/focus/auto', methods=['POST'])
+		def auto_focus():
+			self.camera.set_auto_focus()
+			return jsonify({'status': 'success'})
+
+	def generate_frames(self):
+		while True:
+			frame = self.camera.get_preview_frame()
+			if frame is not None:
+				ret, buffer = cv2.imencode('.jpg', frame)
+				if ret:
+					frame_bytes = buffer.tobytes()
+					yield (b'--frame\r\n'
+						   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+			time.sleep(0.1)
+
+	def run(self):
+		self.app.run(host='0.0.0.0', port=self.port, debug=False, threaded=True)
+
 class TimelapseCamera:
 	def __init__(self, test_mode=False, skip_video=False):
 		self.config = load_config()
@@ -302,6 +362,8 @@ class TimelapseCamera:
 		self.skip_video = skip_video
 		self.capturing_enabled = True
 		self.start_time = time.time()
+		self.preview_mode = False
+		self.preview_lock = threading.Lock()
 
 		# Initialize MQTT connection
 		try:
@@ -365,53 +427,90 @@ class TimelapseCamera:
 			logger.error(f"Failed to calculate sun times: {e}")
 			raise
 
+	def start_preview(self):
+		"""Switch to preview mode"""
+		with self.preview_lock:
+			self.preview_mode = True
+			# Configure camera for preview (lower res for performance)
+			preview_config = self.camera.create_preview_configuration(
+				main={"size": (640, 480)},
+				controls={"FrameDurationLimits": (33333, 33333)}
+			)
+			self.camera.configure(preview_config)
+
+	def stop_preview(self):
+		"""Switch back to capture mode"""
+		with self.preview_lock:
+			self.preview_mode = False
+			# Restore full resolution configuration
+			capture_config = self.camera.create_still_configuration(
+				main={"size": (3840, 2160)},
+				controls={"FrameDurationLimits": (33333, 33333)}
+			)
+			self.camera.configure(capture_config)
+
+	def get_preview_frame(self):
+		"""Get a frame for the web preview"""
+		with self.preview_lock:
+			if not self.preview_mode:
+				return None
+			return self.camera.capture_array()
+
 	def take_photo(self):
 		"""Capture a single photo with timestamp"""
-		try:
-			timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-			filename = f"photo_{timestamp}.jpg"
-			filepath = self.photos_dir / filename
+		with self.preview_lock:
+			# If we're in preview mode, switch back temporarily
+			was_previewing = self.preview_mode
+			if was_previewing:
+				self.stop_preview()
 
-			self.camera.capture_file(str(filepath))
-			logger.info(f"Photo captured: {filename}")
+			try:
+				timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+				filename = f"photo_{timestamp}.jpg"
+				filepath = self.photos_dir / filename
 
-			# Publish to Home Assistant
-			if self.ha_mqtt:
-				try:
-					# Open and resize image
-					with Image.open(filepath) as img:
-						# Calculate new size (1/8 of original)
-						new_size = (img.width // 8, img.height // 8)
-						resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
+				self.camera.capture_file(str(filepath))
+				logger.info(f"Photo captured: {filename}")
 
-						# Convert to JPEG bytes
-						img_byte_arr = io.BytesIO()
-						resized_img.save(img_byte_arr, format='JPEG', quality=70)
-						img_byte_arr = img_byte_arr.getvalue()
+				# Publish to Home Assistant
+				if self.ha_mqtt:
+					try:
+						# Open and resize image
+						with Image.open(filepath) as img:
+							# Calculate new size (1/8 of original)
+							new_size = (img.width // 8, img.height // 8)
+							resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-						# Convert to base64
-						img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
-						img_size_kb = len(img_byte_arr) / 1024
+							# Convert to JPEG bytes
+							img_byte_arr = io.BytesIO()
+							resized_img.save(img_byte_arr, format='JPEG', quality=70)
+							img_byte_arr = img_byte_arr.getvalue()
 
-						# Log size information
-						logger.info(f"Image size before base64: {img_size_kb:.1f}KB")
-						logger.info(f"Image dimensions after resize: {new_size[0]}x{new_size[1]}")
+							# Convert to base64
+							img_base64 = base64.b64encode(img_byte_arr).decode('utf-8')
+							img_size_kb = len(img_byte_arr) / 1024
 
-						# Publish to MQTT
-						topic = f"{self.ha_mqtt.device_name}/camera/image"
-						logger.info(f"Publishing resized image ({len(img_base64)} bytes) to {topic}")
-						self.ha_mqtt.client.publish(topic, img_base64, retain=True)
+							# Log size information
+							logger.info(f"Image size before base64: {img_size_kb:.1f}KB")
+							logger.info(f"Image dimensions after resize: {new_size[0]}x{new_size[1]}")
 
-						# Publish timestamp in ISO format with timezone
-						now = datetime.now().astimezone().isoformat()
-						self.ha_mqtt.publish_state("last_capture", now)
+							# Publish to MQTT
+							topic = f"{self.ha_mqtt.device_name}/camera/image"
+							logger.info(f"Publishing resized image ({len(img_base64)} bytes) to {topic}")
+							self.ha_mqtt.client.publish(topic, img_base64, retain=True)
 
-						# Also publish the path for reference
-						self.ha_mqtt.publish_state("latest_photo", str(filepath))
-				except Exception as e:
-					logger.error(f"Failed to publish image: {e}")
-		except Exception as e:
-			logger.error(f"Failed to capture photo: {e}")
+							# Publish timestamp in ISO format with timezone
+							now = datetime.now().astimezone().isoformat()
+							self.ha_mqtt.publish_state("last_capture", now)
+
+							# Also publish the path for reference
+							self.ha_mqtt.publish_state("latest_photo", str(filepath))
+					except Exception as e:
+						logger.error(f"Failed to publish image: {e}")
+			finally:
+				# Restore preview if we were in preview mode
+				if was_previewing:
+					self.start_preview()
 
 	def create_video(self):
 		"""Create video from photos taken today"""
@@ -530,13 +629,41 @@ class TimelapseCamera:
 		except Exception as e:
 			logger.error(f"Error during cleanup: {e}")
 
+	def set_focus(self, value):
+		with self.preview_lock:
+			if self.camera:
+				# Convert 0-100 value to appropriate focus range
+				focus_value = int((value / 100.0) * 1000)  # Adjust range as needed
+				self.camera.set_controls({"AfMode": controls.AfModeEnum.Manual,
+										"LensPosition": focus_value})
+
+	def set_auto_focus(self):
+		with self.preview_lock:
+			if self.camera:
+				self.camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+
+	def start_capture(self):
+		self.capturing_enabled = True
+
+	def stop_capture(self):
+		self.capturing_enabled = False
+
 if __name__ == "__main__":
-	parser = argparse.ArgumentParser(description='Timelapse Camera')
+	parser = argparse.ArgumentParser(description='Timelapse Camera Control')
 	parser.add_argument('--test', action='store_true', help='Run in test mode')
 	parser.add_argument('--no-video', action='store_true', help='Skip video creation in test mode')
+	parser.add_argument('--web', action='store_true', help='Start web interface')
+	parser.add_argument('--web-port', type=int, default=8000, help='Web interface port')
 	args = parser.parse_args()
 
 	camera = TimelapseCamera(test_mode=args.test, skip_video=args.no_video)
+
+	if args.web:
+		web_interface = CameraWebInterface(camera, port=args.web_port)
+		web_thread = threading.Thread(target=web_interface.run)
+		web_thread.daemon = True
+		web_thread.start()
+
 	try:
 		camera.run()
 	finally:

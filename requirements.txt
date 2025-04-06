@@ -1,8 +1,10 @@
 # Python package dependencies
-picamera2>=0.3.16
-astral>=3.2
-paho-mqtt>=1.6.1
-Pillow>=10.0.0  # For image processing
+flask==2.0.1
+picamera2==0.3.12
+numpy==1.21.2
+opencv-python==4.5.3.56
+Pillow==8.3.2
+paho-mqtt==1.5.1
 
 # System dependencies (install with apt)
 # sudo apt install python3-libcamera python3-picamera2 python3-astral python3-paho-mqtt python3-pil ffmpeg

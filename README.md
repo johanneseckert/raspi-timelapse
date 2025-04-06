@@ -1,95 +1,72 @@
-# Raspberry Pi Timelapse Camera
+# Raspberry Pi Timelapse Camera with Web Interface
 
-This is a Python-based timelapse camera system for Raspberry Pi that automatically captures photos during daylight hours and creates daily timelapse videos.
+This project provides a timelapse camera system for the Raspberry Pi with a web interface for live preview and control.
 
 ## Features
 
-- Automatic photo capture during daylight hours
-- Configurable start/end times relative to sunrise/sunset
-- 1080p resolution photos
-- Automatic daily video creation
-- Configurable capture interval
-- Automatic restart on system boot
+- 4K (3840x2160) photo capture
+- Live preview through web interface
+- Manual and automatic focus control
+- Start/stop capture control
+- MQTT integration with Home Assistant
+- Configurable capture intervals
 
-## Setup
+## Installation
 
-1. Install dependencies:
+1. Install system dependencies:
 ```bash
-# System packages
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-libcamera python3-picamera2 python3-astral python3-paho-mqtt python3-pil ffmpeg
-
-# Or if you prefer using pip (not recommended on Debian/Raspberry Pi OS):
-# sudo pip3 install -r requirements.txt
+sudo apt-get install -y python3-pip python3-opencv
 ```
 
-2. Configure the camera:
-   - Edit the configuration in the script
-   - Set your latitude/longitude
-   - Adjust timing parameters as needed
-
-3. Set up as a system service:
+2. Install Python dependencies:
 ```bash
-sudo cp timelapse.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable timelapse
-sudo systemctl start timelapse
+pip3 install -r requirements.txt
 ```
 
-## Directory Structure
+3. Create necessary directories:
+```bash
+mkdir -p photos
+```
 
-- `/opt/timelapse/photos/` - Contains individual photos
-- `/opt/timelapse/videos/` - Contains daily timelapse videos
-- `/opt/timelapse/timelapse.log` - Log file
+## Usage
+
+1. Start the camera with web interface:
+```bash
+python3 timelapse.py --web --web-port 8000
+```
+
+2. Access the web interface:
+Open a web browser and navigate to:
+```
+http://<raspberry-pi-ip>:8000
+```
+
+## Web Interface Controls
+
+- **Live Preview**: Toggle the live camera preview
+- **Capture Control**: Start/stop timelapse capture
+- **Focus Control**:
+  - Auto Focus: Switch to automatic focus mode
+  - Manual Focus: Use the slider to adjust focus manually
 
 ## Configuration
 
-1. Copy the template configuration file:
-```bash
-cp config.template.json config.json
-```
+Edit `config.json` to modify:
+- Capture interval
+- Image quality settings
+- MQTT settings
+- Other camera parameters
 
-2. Edit `config.json` to match your setup:
-```json
-{
-	"location": {
-		"latitude": 48.4639,      // Your latitude
-		"longitude": 9.2075,      // Your longitude
-		"timezone": "Europe/Berlin"  // Your timezone
-	},
-	"camera": {
-		"hours_before_sunrise": 1,  // Start capturing this many hours before sunrise
-		"hours_after_sunset": 1,    // Continue capturing this many hours after sunset
-		"interval_minutes": 1,      // Minutes between photos
-		"resolution": {
-			"width": 1920,         // Photo width
-			"height": 1080         // Photo height
-		}
-	},
-	"mqtt": {
-		"host": "localhost",      // MQTT broker host (for Home Assistant)
-		"port": 1883,            // MQTT broker port
-		"username": null,        // MQTT username if required
-		"password": null         // MQTT password if required
-	},
-	"test_mode": {
-		"capture_count": 10,     // Number of photos in test mode
-		"interval_seconds": 2     // Seconds between photos in test mode
-	},
-	"paths": {
-		"base_dir": "/opt/timelapse",  // Base directory for all files
-		"photos_dir": "photos",        // Photo directory (relative to base_dir)
-		"videos_dir": "videos",        // Video directory (relative to base_dir)
-		"log_file": "timelapse.log"    // Log file (relative to base_dir)
-	}
-}
-```
+## MQTT Integration
 
-The `config.json` file is ignored by git to keep your settings private. The template file (`config.template.json`) contains default values and is version controlled.
+The system publishes:
+- Latest photo (resized to 480x270 for MQTT)
+- Camera status
+- Uptime information
 
-## Monitoring
+## Notes
 
-Check the log file for status and errors:
-```bash
-tail -f /opt/timelapse/timelapse.log
-```
+- The camera captures at 4K resolution but sends smaller preview images to reduce bandwidth usage
+- The web interface runs on port 8000 by default
+- Photos are saved in the `photos` directory with timestamps
