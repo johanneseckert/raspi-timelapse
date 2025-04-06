@@ -168,7 +168,7 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container" data-preview-mode="{{ preview_mode | tojson }}">
         <div class="preview-container">
             <img id="preview" src="{{ url_for('stream') }}" style="display: none;">
             <img id="lastCapture" src="{{ url_for('last_image') }}" style="width: 100%;">
@@ -336,9 +336,11 @@
         setInterval(updateLastCaptureTime, 30000);
 
         // Initial interface update
-        updateInterface({{ 'true' if preview_mode else 'false' }});
+        const container = document.querySelector('.container');
+        const initialPreviewMode = container.dataset.previewMode === 'true';
+        updateInterface(initialPreviewMode);
 
-        // Log handling
+        // Log viewer functionality
         async function updateLatestLog() {
             try {
                 const response = await fetch('/logs/latest');
