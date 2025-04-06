@@ -83,18 +83,64 @@ def load_config():
 
 	return config
 
+class CircularLogBuffer:
+	def __init__(self, max_size=1000):
+		self.buffer = []
+		self.max_size = max_size
+		self.lock = threading.Lock()
+
+	def add(self, message):
+		with self.lock:
+			self.buffer.append(message)
+			if len(self.buffer) > self.max_size:
+				self.buffer.pop(0)
+
+	def get_latest(self):
+		with self.lock:
+			return self.buffer[-1] if self.buffer else "No logs available"
+
+	def get_recent(self, num_lines=100):
+		with self.lock:
+			return self.buffer[-num_lines:] if self.buffer else []
+
+# Create global log buffer
+log_buffer = CircularLogBuffer()
+
+class LogBufferHandler(logging.Handler):
+	def __init__(self, buffer):
+		super().__init__()
+		self.buffer = buffer
+
+	def emit(self, record):
+		try:
+			msg = self.format(record)
+			self.buffer.add(msg)
+		except Exception:
+			self.handleError(record)
+
 # Configure logging
 config = load_config()  # Load config first to get log file path
 log_file = Path(config['paths']['base_dir']) / config['paths']['log_file']
 log_file.parent.mkdir(parents=True, exist_ok=True)
 
+# Create formatters and handlers
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+buffer_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+file_handler = logging.FileHandler(str(log_file))
+file_handler.setFormatter(file_formatter)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(console_formatter)
+
+buffer_handler = LogBufferHandler(log_buffer)
+buffer_handler.setFormatter(buffer_formatter)
+
+# Configure root logger
 logging.basicConfig(
 	level=logging.INFO,
-	format='%(asctime)s - %(levelname)s - %(message)s',
-	handlers=[
-		logging.FileHandler(str(log_file)),
-		logging.StreamHandler()
-	]
+	handlers=[file_handler, console_handler, buffer_handler]
 )
 logger = logging.getLogger(__name__)
 
@@ -296,7 +342,6 @@ class CameraWebInterface:
 		self.camera = camera_instance
 		self.app = Flask(__name__)
 		self.port = port
-		self.log_file = Path(config['paths']['base_dir']) / config['paths']['log_file']
 		self.setup_routes()
 
 	def setup_routes(self):
@@ -312,29 +357,16 @@ class CameraWebInterface:
 
 		@self.app.route('/logs/latest')
 		def get_latest_log():
-			try:
-				# Get the last line from the log file
-				with open(self.log_file, 'r') as f:
-					lines = f.readlines()
-					if lines:
-						return jsonify({'line': lines[-1].strip()})
-					return jsonify({'line': 'No logs available'})
-			except Exception as e:
-				logger.error(f"Error reading latest log: {e}")
-				return jsonify({'line': 'Error reading logs'})
+			return jsonify({'line': log_buffer.get_latest()})
 
 		@self.app.route('/logs/recent')
 		def get_recent_logs():
 			try:
-				num_lines = min(int(request.args.get('lines', 100)), 1000)  # Cap at 1000 lines
-				with open(self.log_file, 'r') as f:
-					# Read all lines and get the last n lines
-					lines = f.readlines()
-					recent_logs = lines[-num_lines:] if len(lines) > num_lines else lines
-					return jsonify({'logs': [line.strip() for line in recent_logs]})
+				num_lines = min(int(request.args.get('lines', 100)), 1000)
+				return jsonify({'logs': log_buffer.get_recent(num_lines)})
 			except Exception as e:
-				logger.error(f"Error reading recent logs: {e}")
-				return jsonify({'logs': ['Error reading logs']})
+				logger.error(f"Error getting recent logs: {e}")
+				return jsonify({'logs': ['Error retrieving logs']})
 
 		@self.app.route('/status')
 		def status():
