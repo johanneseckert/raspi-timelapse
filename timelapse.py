@@ -43,7 +43,7 @@ TODO: Home Assistant Integration
 import os
 import time
 from datetime import datetime, timedelta
-import zoneinfo
+import pytz
 from pathlib import Path
 import logging
 import json
@@ -373,7 +373,7 @@ class CameraWebInterface:
 		def status():
 			try:
 				# Get timezone from config
-				tz = zoneinfo.ZoneInfo(self.camera.config['location']['timezone'])
+				tz = pytz.timezone(self.camera.config['location']['timezone'])
 				current_time = datetime.now(tz)
 				start_time, end_time = self.camera.get_sun_times()
 
@@ -562,7 +562,7 @@ class TimelapseCamera:
 		"""Calculate sunrise and sunset times for the current day"""
 		try:
 			# Get timezone
-			tz = zoneinfo.ZoneInfo(self.config['location']['timezone'])
+			tz = pytz.timezone(self.config['location']['timezone'])
 			today = datetime.now(tz).date()
 
 			# Create location info
@@ -822,7 +822,7 @@ class TimelapseCamera:
 
 				# Get sun times and ensure current time is in the same timezone
 				start_time, end_time = self.get_sun_times()
-				tz = zoneinfo.ZoneInfo(self.config['location']['timezone'])
+				tz = pytz.timezone(self.config['location']['timezone'])
 				current_time = datetime.now(tz)
 
 				# Log current status for debugging
