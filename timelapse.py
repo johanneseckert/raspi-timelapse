@@ -390,16 +390,16 @@ class CameraWebInterface:
 				}
 
 				# Determine status message
-				if current_time < start_time:
+				if self.camera.preview_mode:
+					status_info['status_message'] = "Live preview mode active"
+				elif current_time < start_time:
 					status_info['status_message'] = f"Waiting for sunrise capture time ({start_time.strftime('%H:%M')})"
 				elif current_time > end_time:
 					status_info['status_message'] = f"Capture ended for today (sunset was at {end_time.strftime('%H:%M')})"
 				elif not self.camera.capturing_enabled:
-					status_info['status_message'] = "Capture manually disabled"
-				elif self.camera.preview_mode:
-					status_info['status_message'] = "Live preview mode active"
+					status_info['status_message'] = "Capture mode active (capture disabled)"
 				else:
-					status_info['status_message'] = "Capturing enabled"
+					status_info['status_message'] = "Capture mode active (capture enabled)"
 
 				return jsonify(status_info)
 			except Exception as e:
@@ -418,6 +418,8 @@ class CameraWebInterface:
 
 		@self.app.route('/capture/stop', methods=['POST'])
 		def stop_capture():
+			if self.camera.preview_mode:
+				return jsonify({'error': 'Cannot stop capture while in preview mode'}), 400
 			self.camera.stop_capture()
 			return jsonify({'success': True, 'capturing': False})
 
@@ -427,7 +429,7 @@ class CameraWebInterface:
 			return jsonify({
 				'success': True,
 				'preview_mode': True,
-				'capturing_enabled': self.camera.capturing_enabled
+				'capturing_enabled': False  # Always false in preview mode
 			})
 
 		@self.app.route('/mode/capture', methods=['POST'])
@@ -436,7 +438,7 @@ class CameraWebInterface:
 			return jsonify({
 				'success': True,
 				'preview_mode': False,
-				'capturing_enabled': self.camera.capturing_enabled
+				'capturing_enabled': True  # Always true in capture mode
 			})
 
 		@self.app.route('/stream')
@@ -694,9 +696,10 @@ class TimelapseCamera:
 			logger.info("Starting camera in capture mode")
 			self.camera.start()
 
-			# Restore previous capture state
-			self.load_service_state()
-			logger.info(f"Restored capture state: capturing_enabled={self.capturing_enabled}")
+			# Always enable capturing when switching to capture mode
+			self.capturing_enabled = True
+			self.save_service_state()
+			logger.info("Capture mode enabled")
 
 	def get_preview_frame(self):
 		"""Get a frame for the web preview"""
