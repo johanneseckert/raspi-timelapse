@@ -498,8 +498,9 @@ class TimelapseCamera:
 		logger.info(f"MQTT Settings - Host: {self.config['mqtt']['host']}, Port: {self.config['mqtt']['port']}")
 		logger.info(f"MQTT Auth - Username: {'configured' if self.config['mqtt']['username'] else 'not configured'}")
 
-		self.camera = Picamera2()
-		self.setup_camera()
+		self.camera = None
+		self.initialize_camera_with_retry()
+
 		self.base_dir = Path(self.config['paths']['base_dir'])
 		self.photos_dir = self.base_dir / self.config['paths']['photos_dir']
 		self.videos_dir = self.base_dir / self.config['paths']['videos_dir']
@@ -529,6 +530,30 @@ class TimelapseCamera:
 			logger.error(f"Failed to initialize MQTT handler: {str(e)}")
 			logger.error("MQTT will be disabled")
 			self.ha_mqtt = None
+
+	def initialize_camera_with_retry(self, max_retries=3, retry_delay=2):
+		"""Initialize camera with retry mechanism"""
+		for attempt in range(max_retries):
+			try:
+				logger.info(f"Attempting to initialize camera (attempt {attempt+1}/{max_retries})")
+				self.camera = Picamera2()
+				self.setup_camera()
+				logger.info("Camera initialized successfully")
+				return
+			except RuntimeError as e:
+				if "Device or resource busy" in str(e) or "Pipeline handler in use" in str(e):
+					if attempt < max_retries - 1:
+						logger.warning(f"Camera is busy, waiting {retry_delay} seconds before retry...")
+						time.sleep(retry_delay)
+					else:
+						logger.error("Failed to initialize camera after multiple attempts. The camera may be in use by another process.")
+						raise
+				else:
+					logger.error(f"Failed to initialize camera: {e}")
+					raise
+			except Exception as e:
+				logger.error(f"Unexpected error initializing camera: {e}")
+				raise
 
 	def setup_camera(self):
 		"""Initialize camera settings"""
@@ -863,14 +888,18 @@ class TimelapseCamera:
 				time.sleep(60)  # Wait a minute before retrying
 
 	def cleanup(self):
-		"""Cleanup resources before exit"""
+		"""Clean up resources before exit"""
 		try:
 			if self.camera:
+				logger.info("Stopping camera")
 				self.camera.stop()
+				self.camera.close()
+				self.camera = None
+				logger.info("Camera stopped and closed")
 			if self.ha_mqtt:
 				self.ha_mqtt.disconnect()
 		except Exception as e:
-			logger.error(f"Error during cleanup: {e}")
+			logger.error(f"Error during camera cleanup: {e}")
 
 	def set_focus(self, value):
 		"""Set manual focus value"""
@@ -926,9 +955,10 @@ if __name__ == "__main__":
 	parser.add_argument('--capture', action='store_true', help='Run in capture mode (based on sunrise/sunset)')
 	args = parser.parse_args()
 
-	camera = TimelapseCamera(test_mode=args.test, skip_video=args.no_video)
-
+	camera = None
 	try:
+		camera = TimelapseCamera(test_mode=args.test, skip_video=args.no_video)
+
 		if args.web and args.capture:
 			# Run both web interface and capture
 			web_interface = CameraWebInterface(camera, port=args.web_port)
@@ -947,4 +977,5 @@ if __name__ == "__main__":
 		else:
 			parser.print_help()
 	finally:
-		camera.cleanup()
+		if camera:
+			camera.cleanup()
